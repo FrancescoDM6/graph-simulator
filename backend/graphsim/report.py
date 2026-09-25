@@ -87,7 +87,8 @@ def reanalyze(conn, run_ids: list[int]) -> None:
     """Recomputes stored runs' measures from the database, e.g. after changing a measure's
     definition in analysis.py, without re-running anything. Summary-level runs only stored their
     metrics every few ticks, so their recomputed measures are close to, not exactly, the ones
-    computed while they ran."""
+    computed while they ran. The drought ratios suffer most (about 20% low): droughts start on
+    multiples of 200, so the samples always include a drought's first, not-yet-hungry tick."""
     for run_id in run_ids:
         row = conn.execute("select ticks, config_json from runs where id = ?", (run_id,)).fetchone()
         min_lifespan = json.loads(row["config_json"])["metrics"]["community_min_lifespan"]

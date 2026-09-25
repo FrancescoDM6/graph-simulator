@@ -113,6 +113,41 @@ trust is recorded in a **trust ledger** together with the event that caused it.
 > These are *recorded contributing causes*: what the rules knew about when they acted. They are
 > a trail to follow, not proof. Whether a cause really matters is what ablations answer.
 
+## The resource ledger
+
+Every movement of coin or goods is recorded as a `Flow` with an agent, asset, signed amount,
+category, counterparty and the event that caused it. The categories are:
+
+| Category | Recorded in |
+|---|---|
+| endowment | `world_gen.create_agent` |
+| harvest, tool_use | `rules/production.py` |
+| eaten, spoiled | `rules/needs.py` |
+| departure | `rules/needs.py` (what an agent takes when it leaves) |
+| sale, purchase, commission, gift_given, gift_received | `rules/trade.py` |
+| levy_paid, levy_received | `rules/market.py` |
+
+A brokered sale records the buyer's purchase, the seller's sale and the broker's commission (its
+counterparty is `buyer>seller`).
+
+`test_ledger.py` checks that the ledger is complete. For every agent, asset and tick, the flows
+sum exactly to the change in holdings, in several variants. Anything that moves resources
+without a flow fails this test.
+
+## Milestones
+
+`milestones.py` turns the ledger into explanations. An agent's standing changes when it holds
+at least `wealthy_ratio` × the median agent's coin (wealthy), at most `poor_ratio` × the median
+(poor), or has at least `hub_ratio` × the median number of ties (hub). A `became_*` or
+`no_longer_*` event is logged once the change has lasted `status_hold` ticks. Ratios to the
+median are used rather than ranks, so nobody "becomes wealthy" while everyone holds the same.
+
+Each milestone's `cause` summarizes the agent's ledger over the last `attribution_window` ticks,
+e.g. "earned 689 coin (commission 97% from 76 pairs); spent 634 (levy 74%, purchase 26%)".
+Its `caused_by` points at the largest trades and gifts behind it. So the trail
+wealthy ← commissions ← these brokered trades is built from records only. Milestones run in the
+metrics phase and only read the world: a seed's behaviour is identical with or without them.
+
 ## Communities with identity
 
 Louvain runs every `community_every` ticks. New communities are matched to living ones by member
@@ -125,15 +160,18 @@ overlap:
 
 Each community keeps a record: born, died, fate, parent, merged-into, peak size, members ever and
 turnover. Communities shorter-lived than `community_min_lifespan` count as detection flicker.
+At full recording, each detection also stores the community's internal density, mean internal
+trust and internal trade. Organizations get the same record every tick (`org_ticks`).
 
 ## Recording and runs
 
 Every run is stored in the run database (`[run] database`, SQLite) and never overwritten.
 
 - **`full` recording** (for the viewer) keeps per-tick snapshots and agent histories, detail
-  events, the trust ledger and community membership. That's about 19 KB per tick.
+  events, the trust ledger, the itemized resource ledger, and community and organization
+  histories. That's about 26 KB per tick, 7 KB of it the ledger (about 200 flows a tick).
 - **`summary` recording** (for batch experiments) keeps metrics every 5 ticks, notable events,
-  agent lifetimes and community records.
+  agent lifetimes, each agent's lifetime ledger totals by category, and community records.
 
 Identical runs are identified by config hash, seed, length and code version, and reused rather
 than recomputed. Any summary run can be recomputed at full detail, and it is the same world.
@@ -147,16 +185,31 @@ every tick while the run is computed, and can be recomputed later from storage w
 
 ## What the 100-seed ablation study found
 
-`python -m graphsim.experiment ablations`: seeds 1–100 × 8 variants × 2000 ticks (800 runs,
-about 19 minutes on 22 cores). "Paired" means compared with the baseline run of the same seed.
+`python -m graphsim.experiment ablations`: seeds 1–100 × 9 variants × 2000 ticks (900 runs,
+about 21 minutes on 22 cores). "Paired" means compared with the baseline run of the same seed.
 
 | Phenomenon (measure) | Baseline | What removes or changes it |
 |---|---|---|
-| **Brokerage** (broker share ÷ broker population share ≥ 2) | 100/100 worlds, median 7.7× | **Gone** without merchants (0/100) or with random partners (0/100). **Weakened** without droughts (77/100; lower in 96% of seeds). **Stronger** with a static social graph or without orgs (higher in 75–79% of seeds). |
-| **Inequality** (final Gini ≥ 0.4) | 100/100, median 0.60 | **Gone** without merchants (3/100): merchants are the inequality engine. Random partners reduce it (84/100; lower in 97% of seeds). |
-| **Drought shock** (starvation ratio ≥ 2) | 100/100, median 4.7× | Gone without droughts, as it should be. **Also gone without merchants** (0/100). Over the first 30 seeds, starvation averages 1.65 outside droughts and 1.40 inside them, compared with 1.15 and 6.06 at baseline. Two readings are possible: brokered trade spreads a local drought into widespread hunger, or the people brokers keep fed in normal times are the ones who starve in droughts. `no_merchants` also shrinks the population, so a follow-up variant that keeps the population equal is needed to tell these apart. |
-| **Drought solidarity** (gifts in droughts ≥ 3×) | 100/100, median 13× | Requires droughts and gifting (by construction), and also merchants (0/100 without). A static social graph weakens it (lower in 94% of seeds). |
-| **Factions** (mean communities ≥ 2) | 100/100 | 100/100 in every variant. **This measure doesn't discriminate**: communities largely mirror the three towns. A better factions measure is future work. |
+| **Brokerage** (broker share ÷ broker population share ≥ 2) | 100/100 worlds, median 7.7× | **Gone** without merchants, at either population (0/100), or with random partners (0/100). **Weakened** without droughts (77/100; lower in 96% of seeds). **Stronger** with a static social graph or without orgs (higher in 75–79% of seeds). |
+| **Inequality** (final Gini ≥ 0.4) | 100/100, median 0.60 | **Gone** without merchants: 3/100, and 8/100 at equal population (median 0.29). So it is brokerage, not the smaller population. Random partners reduce it (84/100; lower in 97% of seeds). |
+| **Drought shock** (starvation ratio ≥ 2) | 100/100, median 5.7× | Gone without droughts, as it should be. **Without merchants: gone (0/100, median 0.90), but only partly at equal population** (86/100, median 2.2×; lower than baseline in every seed). See below. |
+| **Drought solidarity** (gifts in droughts ≥ 3×) | 100/100, median 18× | Requires droughts and gifting (by construction). **Weakened** without merchants (median 3.2×, barely above the threshold, so 83/100; 9.8× at equal population), with random partners (10.7×) and with a static social graph (12×). |
+| **Factions** (mean communities ≥ 2) | 100/100 | 100/100 in every variant. This measure only counts groups, and at this scale there are always at least two. |
+| **Factions beyond geography** (mean town alignment ≤ 0.95) | 86/100, median 0.88 | **Gone** without merchants at either population: alignment is exactly 1.0 in all 200 worlds, so every community is exactly one town's people. Merchants are what tie people across towns. **Stronger** without gifting (100/100, median 0.76; lower in 93% of seeds): gifts bind neighbours within a town. |
+
+**Town alignment** is the normalized mutual information between the community partition and the
+home-town partition, averaged over the second half of the run: 1 when communities are exactly
+the towns, 0 when knowing someone's community says nothing about their town. The 0.95 threshold
+was set from 20 calibration worlds (baseline median 0.885; no_merchants 1.0 in all 20) before
+this study ran.
+
+**Drought shock without merchants.** The earlier study could not tell whether brokers matter or
+whether no_merchants simply has four fewer people. `no_merchants_equal_population` gives those
+four slots to farmers and miners. With them, droughts cause starvation again (2.2×), but far less
+than with brokers (5.7×). So population explains part of the effect, and brokerage still more
+than halves the drought shock. The ledger has not yet been used to show *why* (for example,
+whether brokered supply lines fail all at once in a drought); that is a question for the
+viewer's attribution panel.
 
 Other results:
 
@@ -164,5 +217,17 @@ Other results:
   at baseline, but only about 6 without droughts (mostly flicker). Average trust is 0.89 at
   baseline, 0.66 without gifting and 0.59 without droughts. Trust is high *because* hard times
   produce gifts.
+- **Without merchants, communities are short-lived** (median 5–6 ticks). They are the towns,
+  re-detected with small changes, not new groups.
 - **Null result: introductions (triadic closure)** make no measurable difference to any
-  phenomenon at this scale.
+  phenomenon at this scale. Town alignment moves by +0.02, in 59% of seeds.
+- **Null result: organizations** change nothing except brokerage (slightly stronger without
+  them).
+
+> **Measurement change since the first study.** The first study's measures were computed from
+> metrics sampled every 5 ticks. They are now computed from every tick. Behaviour is identical:
+> gift, departure and split counts and final Gini match exactly for the same seed. Time averages
+> barely moved, but the drought ratios rose (baseline starvation 4.7× → 5.7×, gifts 13× → 18×).
+> Droughts start on multiples of 200, so the 5-tick samples always caught each drought's first
+> tick, before hunger had built up. One verdict changed: solidarity without merchants went from
+> 0/100 to 83/100, because its median (3.2×) is right at the threshold of 3.

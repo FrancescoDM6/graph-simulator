@@ -50,13 +50,17 @@ Loading is strict: a typo'd or missing key is an error naming its place.
 
 ```bash
 cd backend
-uv run python -m graphsim.experiment ablations               # 100 seeds × 8 variants
+uv run python -m graphsim.experiment ablations               # 100 seeds × 9 variants
 uv run python -m graphsim.experiment ablations --seeds 1-10  # a quick look
 uv run python -m graphsim.experiment ablations --report      # print the report again
 uv run python -m graphsim.experiment ablations --reanalyze   # after editing analysis.py
 ```
 
 Runs execute in parallel, and identical runs are reused, so an interrupted experiment resumes.
+
+`--reanalyze` recomputes measures from what summary runs stored: metrics every 5 ticks. That is
+fine for most measures, but it biases the drought ratios by about 20%. To be exact, re-run the
+experiment instead.
 
 The report shows, for each phenomenon and variant:
 - how many worlds show it, with a 95% interval;
@@ -81,13 +85,34 @@ uv run python -m graphsim.cli --seed 4 --variant no_gifting --set trade.gift_amo
   - **Playback.** Play, step or scrub. Runs can be watched while they are still computing.
   - **Timeline.** The key metrics over the whole run, with drought bands. Click or drag to move
     both graphs to that tick; the compared run is drawn dashed.
-  - **Inspector.** Click a node to see its state, charts of its whole life, its relationships
-    and its history. Click its trust chart to list the trust changes behind a jump.
+  - **Graph controls.**
+    - *Colour by* community, occupation or town, or on a scale by wealth, mean trust,
+      betweenness or degree. The legend shows the range at the current tick.
+    - *Highlight events* flashes trades, gifts, starvation, trust crossings, organization
+      changes and arrivals and departures as playback passes them.
+    - *Outlines* draws a shaded hull around each community.
+  - **Inspector.** Click a node to see its state, charts of its whole life (milestones
+    marked), its relationships and its history. Click its trust chart to list the trust changes
+    behind a jump.
+    - **Ego view** shows only that agent and its neighbours within 1 or 2 hops.
+    - **Where did it come from?** splits an agent's coin and goods into their sources over its
+      whole life or a window around the cursor: sales, commissions, gifts, the town levy,
+      harvests and so on. It also lists top counterparties, with a *why?* link on each trade.
   - **Why?** Opens the causal trail of any event: the events that led to it, and so on
     backwards.
   - **Communities.** Every community's lifespan, with splits and mergers. Click one to
-    highlight its members.
+    highlight its members and open its page, which shows its size, internal trust, density and
+    trade over time, who joined and left, and its key events. Organizations have the same page
+    (click an organization node, then *Open page*).
 - **Experiments.** Results of each experiment, as described above.
+- **Export.** Every chart, the whole timeline, the graph and each experiment plot has an
+  *Export* menu:
+  - SVG (vector, for papers), PNG at 2× or 4×, and CSV of the numbers plotted;
+  - in compare mode the graph export holds both graphs side by side.
+
+  File names say what the file shows, e.g. `run838_seed4_baseline_t300_graph.svg`. Each figure
+  embeds a caption and a `<desc>` with the run, seed, variant, tick, code version and config
+  hash, so it can always be traced back to its data.
 
 ## Working with the data
 
@@ -114,6 +139,7 @@ backend/graphsim/
   events.py                    the event log with causal links
   communities.py               community identity over time
   metrics.py                   network measurements and structural events
+  milestones.py                became wealthy / poor / a hub, explained from the ledger
   recorder.py  storage.py      what gets stored, and the run database
   runner.py                    compute (or reuse) a run
   analysis.py  report.py       run-level measures; experiment statistics
@@ -130,4 +156,5 @@ cd frontend && npm run typecheck && npm run build
 ```
 
 The tests cover determinism across processes, each mechanism switch, causal links, community
-lineage, storage round-trips, the experiment runner, the report statistics and the API.
+lineage, resource conservation (the ledger accounts for every coin and good), milestones,
+storage round-trips, the experiment runner, the report statistics and the API.
