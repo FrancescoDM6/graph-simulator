@@ -195,6 +195,7 @@ min_component_size = 3         # smaller connected groups (e.g. a lone newcomer)
 min_community_size = 4
 community_match_jaccard = 0.3  # overlap needed for a community to keep its identity
 community_min_lifespan = 5     # shorter-lived communities are reported as detection flicker
+community_every = 1            # run community detection every N ticks
 gini_window = 50
 gini_jump = 0.08
 broker_overtake_margin = 1.1   # a new top broker must beat the old one by 10%

@@ -173,6 +173,7 @@ class MetricsSpec:
     min_community_size: int
     community_match_jaccard: float
     community_min_lifespan: int
+    community_every: int
     gini_window: int
     gini_jump: float
     broker_overtake_margin: float

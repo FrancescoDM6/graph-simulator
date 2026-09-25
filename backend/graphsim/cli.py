@@ -78,8 +78,9 @@ def print_summary(history: list[TickMetrics], event_counts: Counter) -> None:
     print(
         f"  2. Factions:   communities min/avg/max = {min(communities):g}"
         f"/{mean(communities):.1f}/{max(communities):g}"
-        f"; formed {event_counts['community_formed']}x, dissolved "
-        f"{event_counts['community_dissolved']}x"
+        f"; born {event_counts['community_formed']}, split {event_counts['community_split']}, "
+        f"merged {event_counts['community_merged']}, dissolved "
+        f"{event_counts['community_dissolved']}"
     )
     before, after = _drought_edges(history)
     if before:

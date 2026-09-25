@@ -8,7 +8,8 @@ from statistics import mean
 
 import networkx as nx
 
-from graphsim.events import TIE_CHANGE_KINDS, Event, ids
+from graphsim.communities import update_communities
+from graphsim.events import ids
 from graphsim.model import Layer, World
 from graphsim.stats import NodeStats, TickMetrics
 
@@ -18,10 +19,12 @@ def record_tick(world: World) -> None:
     trade = _agent_graph(world, Layer.TRADE)
 
     betweenness = nx.betweenness_centrality(trade)
-    community_of = _update_communities(world, social)
+    state = world.metrics
+    if state.detections == 0 or world.tick % world.cfg.metrics.community_every == 0:
+        state.community_of = update_communities(world, social)
     world.metrics.node_stats = {
         agent_id: NodeStats(
-            community=community_of.get(agent_id, -1),
+            community=state.community_of.get(agent_id, -1),
             betweenness=betweenness.get(agent_id, 0.0),
             degree=social.degree(agent_id) + trade.degree(agent_id),
         )
@@ -29,9 +32,7 @@ def record_tick(world: World) -> None:
     }
     _update_top_broker(world, betweenness, trade)
 
-    metrics = _tick_metrics(
-        world, social, betweenness, community_count=len(world.metrics.communities)
-    )
+    metrics = _tick_metrics(world, social, betweenness, community_count=len(state.alive))
     history = world.metrics.history
     if history:
         before, after = history[-1]["social_components"], metrics["social_components"]
@@ -118,86 +119,6 @@ def _count_components(world: World, social: nx.Graph) -> int:
     )
 
 
-# --- communities ------------------------------------------------------------------------------
-
-
-def _update_communities(world: World, social: nx.Graph) -> dict[str, int]:
-    """Finds communities and gives each a label that persists while its membership overlaps.
-
-    Louvain numbers communities arbitrarily each time, so each new community takes the label of
-    the previous community it overlaps most (Jaccard >= community_match_jaccard). Unmatched
-    communities get a fresh label ("formed"); unmatched old labels are "dissolved".
-    """
-    cfg = world.cfg.metrics
-    state = world.metrics
-    found = [c for c in _louvain(social) if len(c) >= cfg.min_community_size]
-    found.sort(key=lambda c: (-len(c), min(c)))  # biggest first, deterministic
-
-    previous = state.communities
-    labelled: dict[int, set[str]] = {}
-    for members in found:
-        best_label, best_overlap = None, 0.0
-        for label in sorted(previous):
-            if label in labelled:
-                continue
-            overlap = _jaccard(members, previous[label])
-            if overlap > best_overlap:
-                best_label, best_overlap = label, overlap
-        if best_label is not None and best_overlap >= cfg.community_match_jaccard:
-            labelled[best_label] = members
-        else:
-            label = state.next_community_label
-            state.next_community_label += 1
-            labelled[label] = members
-            if world.tick > 1:  # everything is "new" on the first tick; don't log that
-                _log_community_formed(world, label, members, social)
-
-    for label in sorted(previous):
-        if label not in labelled:
-            _log_community_dissolved(world, label, previous[label])
-
-    state.communities = labelled
-    return {agent_id: label for label, members in labelled.items() for agent_id in members}
-
-
-def _louvain(social: nx.Graph) -> list[set[str]]:
-    # Louvain iterates over sets internally. Sets of strings iterate in an order that changes
-    # between Python processes (hash randomization), so run it on integer node labels instead.
-    numbered = nx.convert_node_labels_to_integers(social, label_attribute="agent_id")
-    communities = nx.community.louvain_communities(numbered, weight="strength", seed=0)
-    return [{numbered.nodes[n]["agent_id"] for n in c} for c in communities]
-
-
-def _jaccard(a: set[str], b: set[str]) -> float:
-    return len(a & b) / len(a | b)
-
-
-def _log_community_formed(world: World, label: int, members: set[str], social: nx.Graph) -> None:
-    ordered = sorted(members)
-    hubs = sorted(ordered, key=lambda m: -social.degree(m))[:3]
-    world.log.add(
-        world.tick,
-        "community_formed",
-        tuple(ordered),
-        f"Community {label} formed around {', '.join(world.name(h) for h in hubs)}",
-        cause=f"{len(members)} agents became more tied to each other than to outsiders",
-        caused_by=_tie_changes_among(world, members),
-    )
-
-
-def _log_community_dissolved(world: World, label: int, members: set[str]) -> None:
-    still_here = sorted(m for m in members if m in world.agents)
-    world.log.add(
-        world.tick,
-        "community_dissolved",
-        tuple(still_here),
-        f"Community {label} broke apart",
-        cause=f"{len(members) - len(still_here)} of its {len(members)} members left the world; "
-        "the rest's ties weakened or merged into other groups",
-        caused_by=_tie_changes_among(world, members),
-    )
-
-
 # --- structural events ------------------------------------------------------------------------
 
 
@@ -240,16 +161,6 @@ def _detect_component_change(world: World, before: int, after: int) -> None:
         cause = "new ties bridged separate groups"
         caused_by = ids(additions[:5])
     world.log.add(world.tick, kind, (), message, cause, caused_by)
-
-
-def _tie_changes_among(world: World, members: set[str], limit: int = 8) -> tuple[int, ...]:
-    """This tick's events that added or removed ties involving the community's members."""
-    changes: list[Event] = [
-        e
-        for e in world.log.this_tick(world.tick)
-        if e.kind in TIE_CHANGE_KINDS and members & set(e.subjects)
-    ]
-    return ids(changes[:limit])
 
 
 def _detect_inequality_jump(world: World, gini_now: float) -> None:
