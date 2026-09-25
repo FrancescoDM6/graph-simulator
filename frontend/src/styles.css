@@ -1,0 +1,374 @@
+:root {
+  --bg: #14161a;
+  --panel: #1c1f25;
+  --panel-raised: #252932;
+  --border: #2e333d;
+  --text: #d7dae0;
+  --muted: #8a90a0;
+  --accent: #6ea8fe;
+  --danger: #ff4d4d;
+  --warning: #f0a04b;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0d1117;
+  font-weight: 600;
+  min-width: 70px;
+}
+
+.loading {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  color: var(--muted);
+}
+
+/* --- Layout: controls on top, graph | inspector in the middle, events at the bottom -------- */
+
+.app {
+  display: grid;
+  grid-template-rows: auto auto 1fr 200px;
+  height: 100vh;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  min-height: 0;
+}
+
+.graph-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.graph {
+  position: absolute;
+  inset: 0;
+}
+
+/* --- Controls ------------------------------------------------------------------------------ */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.seed {
+  width: 64px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
+.layer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.status {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.status.offline {
+  color: var(--danger);
+}
+
+.drought {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--warning);
+  color: #0d1117;
+  font-weight: 600;
+}
+
+/* --- Legend -------------------------------------------------------------------------------- */
+
+.legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  padding: 8px 10px;
+  background: rgba(28, 31, 37, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+
+.legend-title {
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.legend-title:first-child {
+  margin-top: 0;
+}
+
+.ring {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 3px solid;
+  vertical-align: -1px;
+}
+
+/* --- Shared bits --------------------------------------------------------------------------- */
+
+.muted {
+  color: var(--muted);
+}
+
+button.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+button.link:hover {
+  text-decoration: underline;
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-header label {
+  font-weight: normal;
+  color: var(--muted);
+}
+
+/* --- Metrics bar --------------------------------------------------------------------------- */
+
+.metrics-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  cursor: help;
+}
+
+.metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.metric-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* --- Inspector ----------------------------------------------------------------------------- */
+
+.inspector {
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.inspector h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.inspector h3 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.state {
+  margin: 0;
+}
+
+.state div {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.state dt {
+  color: var(--muted);
+}
+
+.state dd {
+  margin: 0;
+  text-align: right;
+}
+
+.relationship-layer ul {
+  list-style: none;
+  margin: 2px 0 8px;
+  padding-left: 10px;
+}
+
+.layer-name {
+  font-weight: 600;
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.history li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* --- Event feed ---------------------------------------------------------------------------- */
+
+.event-feed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px;
+  overflow-y: auto;
+}
+
+.event {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.event.clickable {
+  cursor: pointer;
+}
+
+.event.clickable:hover {
+  background: var(--panel-raised);
+}
+
+.event.structural .event-message {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.event-tick {
+  min-width: 44px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.event-cause {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event .event-cause::before {
+  content: "— ";
+}
