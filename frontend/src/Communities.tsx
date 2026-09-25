@@ -1,14 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { CHART_BACKGROUND } from "./charts/LineChart";
+import { ExportMenu } from "./ExportMenu";
+import { figureFromElement, fileStem, runDescription } from "./export";
 import { communityColor } from "./graphStyle";
 import { useElementWidth } from "./hooks/useElementWidth";
-import type { CommunityRow } from "./types";
+import type { CommunityRow, RunInfo } from "./types";
 
 const ROW_HEIGHT = 16;
 const MIN_LIFESPAN = 5; // shorter-lived communities are detection flicker (scenario.toml [metrics])
 
 interface Props {
   runId: number;
+  run: RunInfo | undefined;
   lastTick: number;
   cursor: number;
   selected: number | null;
@@ -17,7 +21,8 @@ interface Props {
 
 /** Every community's life as a bar: when it was born, when it died and how (merged into
  * another, split up, dissolved), and where it came from. Click one to highlight its members. */
-export function Communities({ runId, lastTick, cursor, selected, onSelect }: Props) {
+export function Communities({ runId, run, lastTick, cursor, selected, onSelect }: Props) {
+  const svgRef = useRef<SVGSVGElement>(null);
   const [rows, setRows] = useState<CommunityRow[]>([]);
   const [showFlicker, setShowFlicker] = useState(false);
   const [ref, width] = useElementWidth<HTMLDivElement>();
@@ -39,15 +44,27 @@ export function Communities({ runId, lastTick, cursor, selected, onSelect }: Pro
         <span>
           Communities <span className="muted">({shown.length} shown)</span>
         </span>
-        <label>
-          <input type="checkbox" checked={showFlicker} onChange={(e) => setShowFlicker(e.target.checked)} /> include
-          ones shorter than {MIN_LIFESPAN} ticks
-        </label>
+        <span className="header-options">
+          <label>
+            <input type="checkbox" checked={showFlicker} onChange={(e) => setShowFlicker(e.target.checked)} />{" "}
+            include ones shorter than {MIN_LIFESPAN} ticks
+          </label>
+          <ExportMenu
+            stem={fileStem(run, "communities")}
+            title="Community lifespans"
+            description={`${runDescription(run)}; bars: lifespans; ← parent it split from; → community it merged into`}
+            figure={() => (svgRef.current ? figureFromElement(svgRef.current, CHART_BACKGROUND) : null)}
+            rows={() => [
+              ["community", "born", "died", "fate", "parent", "merged_into", "peak_size", "members_ever", "mean_turnover"],
+              ...rows.map((c) => [c.community_id, c.born, c.died, c.fate, c.parent, c.merged_into, c.peak_size, c.members_ever, c.mean_turnover]),
+            ]}
+          />
+        </span>
       </div>
       <div className="swimlanes" ref={ref}>
         {rows.length === 0 && <div className="muted">No community records (still computing?)</div>}
         {width > 0 && (
-          <svg width={width} height={shown.length * ROW_HEIGHT + 4}>
+          <svg ref={svgRef} width={width} height={shown.length * ROW_HEIGHT + 4}>
             {shown.map((c, i) => {
               const y = i * ROW_HEIGHT + 2;
               const end = c.died ?? lastTick;

@@ -2,7 +2,10 @@
 import type {
   AgentLifetime,
   AgentTick,
+  CommunityPage,
   CommunityRow,
+  LedgerSummary,
+  OrgPage,
   ExperimentReport,
   RunInfo,
   Scenario,
@@ -61,6 +64,7 @@ export const api = {
     }),
   trail: (id: number, eventId: number, depth = 3) =>
     get<TrailNode>(`/runs/${id}/events/${eventId}/trail`, { depth }),
+  agents: (id: number) => get<AgentLifetime[]>(`/runs/${id}/agents`),
   agentHistory: (id: number, agentId: string) =>
     get<{ lifetime: AgentLifetime | null; ticks: AgentTick[] }>(`/runs/${id}/agents/${encodeURIComponent(agentId)}/history`),
   trust: (id: number, agent: string, first: number, last: number) =>
@@ -68,4 +72,8 @@ export const api = {
   communities: (id: number) =>
     get<{ communities: CommunityRow[]; sizes: Record<string, [number, number][]> }>(`/runs/${id}/communities`),
   experiment: (name: string) => get<ExperimentReport>(`/experiments/${encodeURIComponent(name)}`),
+  agentFlows: (id: number, agentId: string, first: number, last: number) =>
+    get<LedgerSummary>(`/runs/${id}/agents/${encodeURIComponent(agentId)}/flows`, { first, last }),
+  community: (id: number, communityId: number) => get<CommunityPage>(`/runs/${id}/communities/${communityId}`),
+  org: (id: number, orgId: string) => get<OrgPage>(`/runs/${id}/orgs/${encodeURIComponent(orgId)}`),
 };

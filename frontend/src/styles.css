@@ -177,6 +177,21 @@ code {
   inset: 0;
 }
 
+.hulls {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hulls path {
+  fill-opacity: 0.12;
+  stroke-opacity: 0.6;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
 .graph-title {
   position: absolute;
   top: 6px;
@@ -730,4 +745,202 @@ code {
 .phenomenon h3 {
   margin: 0 0 2px;
   font-size: 14px;
+}
+
+/* --- Graph display options, export menus ------------------------------------------------------ */
+
+.graph-controls {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  max-width: 70%;
+  padding: 4px 8px;
+  background: rgba(28, 31, 37, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  z-index: 2;
+}
+
+.small-button {
+  padding: 1px 8px;
+  font-size: 12px;
+}
+
+.pulse-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.swatch-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  vertical-align: -1px;
+}
+
+.gradient-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gradient {
+  display: inline-block;
+  width: 90px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.line-chart {
+  position: relative;
+}
+
+.line-chart .export-menu {
+  position: absolute;
+  right: 6px;
+  top: 0;
+  opacity: 0;
+}
+
+.line-chart:hover .export-menu,
+.export-menu:focus-within {
+  opacity: 1;
+}
+
+.export-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 3;
+}
+
+.export-button {
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.export-options {
+  position: absolute;
+  right: 0;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 5;
+}
+
+.export-options button {
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.marker {
+  stroke: #f5d76e;
+  stroke-width: 2;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 70px;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.bar {
+  height: 10px;
+  border-radius: 3px;
+}
+
+.page-panel {
+  position: fixed;
+  top: 90px;
+  right: 16px;
+  bottom: 16px;
+  width: 560px;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  z-index: 9;
+}
+
+.page-panel h2 {
+  margin: 8px 0 4px;
+  font-size: 17px;
+}
+
+.page-panel h3 {
+  margin: 14px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.compact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.compact-list li {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.small-button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.zero-line {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.attribution .compact-list {
+  margin-bottom: 8px;
 }

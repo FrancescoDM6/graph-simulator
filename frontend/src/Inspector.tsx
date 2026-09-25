@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { Attribution } from "./Attribution";
 import { LineChart } from "./charts/LineChart";
+import { fileStem, runDescription } from "./export";
 import { formatNumber } from "./format";
 import { communityColor, LAYER_COLORS } from "./graphStyle";
 import {
@@ -8,6 +10,7 @@ import {
   type GraphEdge,
   type GraphNode,
   LAYERS,
+  type RunInfo,
   type Series,
   type SimEvent,
   type Snapshot,
@@ -15,10 +18,18 @@ import {
 } from "./types";
 
 const TRUST_WINDOW = 5; // clicking the trust chart lists changes from this many ticks before
+const MILESTONE_KINDS = ["wealthy", "poor", "hub"].flatMap((s) => [`became_${s}`, `no_longer_${s}`]);
+
+export type Group = { kind: "community"; id: number } | { kind: "org"; id: string };
 
 interface Props {
   runId: number;
+  run: RunInfo | undefined;
   snapshot: Snapshot;
+  name: (id: string) => string; // any agent's name, including ones who have left
+  ego: { id: string; hops: number } | null;
+  onEgo: (ego: { id: string; hops: number } | null) => void;
+  onOpenGroup: (group: Group) => void;
   selectedId: string | null;
   lastTick: number;
   droughts: [number, number][];
@@ -31,9 +42,8 @@ interface Props {
 /** The selected node at the cursor: its state, charts of its whole life, relationships and
  * history. */
 export function Inspector(props: Props) {
-  const { runId, snapshot, selectedId, onSelect } = props;
+  const { runId, snapshot, selectedId, onSelect, name, ego, onEgo, onOpenGroup } = props;
   const nodesById = new Map(snapshot.nodes.map((n) => [n.id, n]));
-  const name = (id: string) => nodesById.get(id)?.name ?? id;
 
   if (!selectedId) {
     return (
@@ -48,8 +58,56 @@ export function Inspector(props: Props) {
       {node ? (
         <>
           <h2>{node.name}</h2>
+          <div className="inspector-actions">
+            {node.kind === "agent" && (
+              <>
+                ego view:
+                {[1, 2].map((hops) => (
+                  <button
+                    key={hops}
+                    className={`small-button ${ego?.id === node.id && ego.hops === hops ? "active" : ""}`}
+                    onClick={() => onEgo({ id: node.id, hops })}
+                  >
+                    {hops} hop{hops > 1 ? "s" : ""}
+                  </button>
+                ))}
+                {ego && (
+                  <button className="small-button" onClick={() => onEgo(null)}>
+                    off
+                  </button>
+                )}
+                {node.community >= 0 && (
+                  <button className="small-button" onClick={() => onOpenGroup({ kind: "community", id: node.community })}>
+                    community {node.community} ›
+                  </button>
+                )}
+                {node.org && (
+                  <button className="small-button" onClick={() => onOpenGroup({ kind: "org", id: node.org! })}>
+                    organization ›
+                  </button>
+                )}
+              </>
+            )}
+            {node.kind === "org" && (
+              <button className="small-button" onClick={() => onOpenGroup({ kind: "org", id: node.id })}>
+                organization page ›
+              </button>
+            )}
+          </div>
           <NodeState node={node} name={name} />
           {node.kind === "agent" && <AgentCharts {...props} agentId={node.id} />}
+          {node.kind === "agent" && (
+            <Attribution
+              runId={runId}
+              run={props.run}
+              agentId={node.id}
+              cursor={snapshot.tick}
+              stapleGood={props.stapleGood}
+              name={name}
+              onJump={props.onJump}
+              onWhy={props.onWhy}
+            />
+          )}
           <Relationships node={node} edges={snapshot.edges} name={name} onSelect={onSelect} />
         </>
       ) : (
@@ -117,23 +175,33 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
  * chart lists the trust changes just before that tick, each with its cause. */
 function AgentCharts({
   runId,
+  run,
   agentId,
   snapshot,
   lastTick,
   droughts,
   stapleGood,
+  name,
   onJump,
   onWhy,
 }: Props & { agentId: string }) {
   const [history, setHistory] = useState<AgentTick[]>([]);
+  const [milestones, setMilestones] = useState<SimEvent[]>([]);
   const [trustTick, setTrustTick] = useState<number | null>(null);
   const [trust, setTrust] = useState<TrustEntry[]>([]);
 
   useEffect(() => {
     setHistory([]);
+    setMilestones([]);
     setTrustTick(null);
     api.agentHistory(runId, agentId).then((h) => setHistory(h.ticks));
+    api.events(runId, { entity: agentId, kinds: MILESTONE_KINDS, limit: 200 }).then(setMilestones);
   }, [runId, agentId]);
+  const markers = milestones.map((m) => ({ tick: m.tick, label: `${m.message}: ${m.cause}` }));
+  const exportAs = (what: string) => ({
+    stem: fileStem(run, agentId, what),
+    description: `${name(agentId)} (${agentId}), ${runDescription(run)}`,
+  });
 
   useEffect(() => {
     if (trustTick === null) return;
@@ -145,7 +213,7 @@ function AgentCharts({
       const v = value(t);
       return v === null ? [] : [[t.tick, v] as [number, number]];
     });
-  const chart = (label: string, color: string, data: Series, onPick = onJump) => (
+  const chart = (label: string, color: string, data: Series, what: string, onPick = onJump) => (
     <LineChart
       label={label}
       color={color}
@@ -154,11 +222,12 @@ function AgentCharts({
       droughts={droughts}
       cursor={snapshot.tick}
       onPick={onPick}
+      markers={markers}
       height={56}
+      exportAs={exportAs(what)}
     />
   );
   const other = (entry: TrustEntry) => (entry.a === agentId ? entry.b : entry.a);
-  const nameOf = (id: string) => snapshot.nodes.find((n) => n.id === id)?.name ?? id;
 
   return (
     <>
@@ -166,13 +235,28 @@ function AgentCharts({
       {history.length === 0 && <div className="muted small">No per-tick history stored for this run.</div>}
       {history.length > 0 && (
         <div className="agent-charts">
-          {chart("Coin", "#f5d76e", series((t) => t.coin))}
-          {chart(stapleGood, "#7bd88f", series((t) => t.inventory[stapleGood] ?? 0))}
-          {chart("Mean trust (click for causes)", "#6ea8fe", series((t) => t.mean_trust), (tick) => {
+          {chart("Coin", "#f5d76e", series((t) => t.coin), "coin")}
+          {chart(stapleGood, "#7bd88f", series((t) => t.inventory[stapleGood] ?? 0), stapleGood)}
+          {chart("Mean trust (click for causes)", "#6ea8fe", series((t) => t.mean_trust), "trust", (tick) => {
             onJump(tick);
             setTrustTick(tick);
           })}
-          {chart("Broker score", "#f0a04b", series((t) => t.betweenness))}
+          {chart("Broker score", "#f0a04b", series((t) => t.betweenness), "broker-score")}
+          {milestones.length > 0 && (
+            <ul className="compact-list">
+              {milestones.map((m) => (
+                <li key={m.id}>
+                  <button className="event-tick link" onClick={() => onJump(m.tick)}>
+                    {m.tick}
+                  </button>{" "}
+                  <b>{m.message}</b> <span className="event-cause">{m.cause}</span>
+                  <button className="link small why" onClick={() => onWhy(m.id)}>
+                    why?
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {trustTick !== null && (
@@ -191,7 +275,7 @@ function AgentCharts({
                 <span className={entry.after >= entry.before ? "up" : "down"}>
                   {formatNumber(entry.before)} → {formatNumber(entry.after)}
                 </span>{" "}
-                with {nameOf(other(entry))}
+                with {name(other(entry))}
                 {entry.event && <span className="event-cause"> {entry.event.message}</span>}
                 <button className="link small why" onClick={() => onWhy(entry.event_id)}>
                   why?

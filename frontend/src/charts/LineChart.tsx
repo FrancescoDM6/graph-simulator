@@ -1,6 +1,10 @@
 import { useRef } from "react";
+import { ExportMenu } from "../ExportMenu";
+import { figureFromElement } from "../export";
 import { useElementWidth } from "../hooks/useElementWidth";
 import type { Series } from "../types";
+
+export const CHART_BACKGROUND = "#14161a";
 
 interface Props {
   label: string;
@@ -11,14 +15,18 @@ interface Props {
   droughts: [number, number][];
   cursor: number;
   onPick: (tick: number) => void; // click or drag on the chart
+  markers?: { tick: number; label: string }[]; // e.g. milestones, drawn as small ticks
   height?: number;
+  exportAs?: { stem: string; description: string }; // shows an export button when given
 }
 
 const PAD = { left: 44, right: 8, top: 16, bottom: 4 };
 
 /** One small chart of a metric over the whole run, with drought bands and the cursor. */
-export function LineChart({ label, color, a, b, lastTick, droughts, cursor, onPick, height = 70 }: Props) {
+export function LineChart(props: Props) {
+  const { label, color, a, b, lastTick, droughts, cursor, onPick, markers, height = 70, exportAs } = props;
   const [ref, width] = useElementWidth<HTMLDivElement>();
+  const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
 
   const all = [...a, ...(b ?? [])].map(([, v]) => v);
@@ -49,10 +57,25 @@ export function LineChart({ label, color, a, b, lastTick, droughts, cursor, onPi
     onPick(Math.max(0, Math.min(lastTick, Math.round(tick))));
   };
 
+  const csvRows = () => {
+    const bByTick = new Map(b ?? []);
+    return [["tick", label, ...(b ? [`${label} (compared run)`] : [])], ...a.map(([t, v]) => [t, v, ...(b ? [bByTick.get(t) ?? null] : [])])];
+  };
+
   return (
     <div className="line-chart" ref={ref}>
+      {exportAs && (
+        <ExportMenu
+          stem={exportAs.stem}
+          title={label}
+          description={exportAs.description}
+          figure={() => (svgRef.current ? figureFromElement(svgRef.current, CHART_BACKGROUND) : null)}
+          rows={csvRows}
+        />
+      )}
       {width > 0 && (
         <svg
+          ref={svgRef}
           width={width}
           height={height}
           onMouseDown={(e) => {
@@ -88,6 +111,11 @@ export function LineChart({ label, color, a, b, lastTick, droughts, cursor, onPi
           </text>
           {b && <path d={path(b)} fill="none" stroke={color} strokeWidth={1.2} strokeDasharray="4 3" opacity={0.7} />}
           <path d={path(a)} fill="none" stroke={color} strokeWidth={1.5} />
+          {markers?.map((m, i) => (
+            <line key={i} className="marker" x1={x(m.tick)} x2={x(m.tick)} y1={PAD.top} y2={PAD.top + 6}>
+              <title>{`tick ${m.tick}: ${m.label}`}</title>
+            </line>
+          ))}
           <line className="cursor-line" x1={x(cursor)} x2={x(cursor)} y1={PAD.top} y2={PAD.top + plotHeight} />
         </svg>
       )}

@@ -102,6 +102,11 @@ export function Experiments({ scenario, onOpenRun }: Props) {
                 rows={rowsFor(p.measure, phenomenon)}
                 threshold={Number(p.present_if.split(" ")[1])}
                 onPick={onOpenRun}
+                exportAs={{
+                  stem: `experiment_${name}_${phenomenon}`,
+                  title: `${phenomenon}: ${p.measure} per variant`,
+                  description: `experiment ${name} (${report.runs.length} runs); present if ${p.measure} ${p.present_if}; right: share present [95% CI], median change vs ${report.baseline} for the same seed (share of seeds)`,
+                }}
               />
             </section>
           ))}
@@ -117,7 +122,17 @@ export function Experiments({ scenario, onOpenRun }: Props) {
                 ))}
               </select>
             </h3>
-            {extraMeasure && <StripPlot rows={rowsFor(extraMeasure)} onPick={onOpenRun} />}
+            {extraMeasure && (
+              <StripPlot
+                rows={rowsFor(extraMeasure)}
+                onPick={onOpenRun}
+                exportAs={{
+                  stem: `experiment_${name}_${extraMeasure}`,
+                  title: `${extraMeasure} per variant`,
+                  description: `experiment ${name} (${report.runs.length} runs); right: median change vs ${report.baseline} for the same seed`,
+                }}
+              />
+            )}
           </section>
         </>
       )}

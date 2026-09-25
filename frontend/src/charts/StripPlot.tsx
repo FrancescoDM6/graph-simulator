@@ -1,4 +1,8 @@
+import { useRef } from "react";
+import { ExportMenu } from "../ExportMenu";
+import { figureFromElement } from "../export";
 import { useElementWidth } from "../hooks/useElementWidth";
+import { CHART_BACKGROUND } from "./LineChart";
 
 export interface StripRow {
   label: string;
@@ -11,6 +15,7 @@ interface Props {
   rows: StripRow[];
   threshold?: number | null; // e.g. a phenomenon's "present if" value
   onPick: (runId: number) => void;
+  exportAs?: { stem: string; title: string; description: string };
 }
 
 const ROW_HEIGHT = 22;
@@ -18,8 +23,9 @@ const LABEL_WIDTH = 190;
 const NOTE_WIDTH = 190;
 
 /** One row of dots per variant: every run's value of a measure, its median, and a threshold. */
-export function StripPlot({ rows, threshold, onPick }: Props) {
+export function StripPlot({ rows, threshold, onPick, exportAs }: Props) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
+  const svgRef = useRef<SVGSVGElement>(null);
   const values = rows.flatMap((r) => r.points.map((p) => p.value)).filter(Number.isFinite);
   if (threshold !== null && threshold !== undefined) values.push(threshold);
   const low = Math.min(...values, 0);
@@ -29,9 +35,21 @@ export function StripPlot({ rows, threshold, onPick }: Props) {
   const height = rows.length * ROW_HEIGHT + 18;
 
   return (
-    <div className="strip-plot" ref={ref}>
+    <div className="strip-plot line-chart" ref={ref}>
+      {exportAs && (
+        <ExportMenu
+          stem={exportAs.stem}
+          title={exportAs.title}
+          description={exportAs.description}
+          figure={() => (svgRef.current ? figureFromElement(svgRef.current, CHART_BACKGROUND) : null)}
+          rows={() => [
+            ["variant", "seed", "run_id", "value", "present"],
+            ...rows.flatMap((r) => r.points.map((p) => [r.label, p.seed, p.runId, p.value, p.present ?? ""])),
+          ]}
+        />
+      )}
       {width > 0 && (
-        <svg width={width} height={height}>
+        <svg ref={svgRef} width={width} height={height}>
           {threshold !== null && threshold !== undefined && (
             <line className="threshold" x1={x(threshold)} x2={x(threshold)} y1={0} y2={height - 16} />
           )}

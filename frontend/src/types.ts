@@ -60,6 +60,8 @@ export interface RunInfo {
   label: string;
   status: "running" | "done" | "failed";
   ticks_done: number;
+  code_version: string; // git commit the run was computed with
+  config_hash: string; // identifies the exact settings
 }
 
 export type Series = [number, number][]; // [tick, value][]
@@ -79,6 +81,7 @@ export interface AgentNode {
   community: number; // -1 = none
   betweenness: number;
   degree: number;
+  mean_trust: number | null; // over the agent's social ties
 }
 
 export interface TownNode {
@@ -240,4 +243,50 @@ export interface ExperimentReport {
   runs: ExperimentRun[];
   summary: SummaryRow[];
   paired: PairedRow[];
+}
+
+// --- the resource ledger and group pages -------------------------------------------------------
+
+export interface FlowEntry {
+  tick: number;
+  asset: string; // "coin" or a good
+  category: string; // sale, purchase, commission, gift_given, levy_paid, eaten, ...
+  amount: number; // + gained, - lost
+  counterparty: string; // another agent; for a commission "buyer>seller"
+  event_id: number;
+}
+
+export interface LedgerSummary {
+  flows: FlowEntry[];
+  by_category: Record<string, Record<string, number>>; // asset -> category -> total
+  counterparties: { counterparty: string; category: string; coin: number }[];
+  lifetime: { asset: string; category: string; amount: number }[];
+}
+
+export interface GroupHistoryRow {
+  tick: number;
+  size: number;
+  density: number | null;
+  trust: number | null;
+  trade?: number | null;
+}
+
+export interface MembershipChange {
+  tick: number;
+  joined: string[];
+  left: string[];
+}
+
+export interface CommunityPage {
+  record: CommunityRow;
+  history: GroupHistoryRow[];
+  changes: MembershipChange[];
+  events: SimEvent[];
+}
+
+export interface OrgPage {
+  name: string;
+  history: GroupHistoryRow[];
+  changes: MembershipChange[];
+  events: SimEvent[];
 }
