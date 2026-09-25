@@ -32,9 +32,7 @@ TOWNS = [
 
 
 def build_world(cfg: SimConfig, seed: int) -> World:
-    world = World(cfg=cfg, seed=seed, rng=random.Random(seed))
-    world.prices = {"food": cfg.start_price_food, "ore": cfg.start_price_ore}
-    world.logged_prices = dict(world.prices)
+    world = empty_world(cfg, seed)
 
     previous_town_id = None
     for town_name, sites, founding_mix in TOWNS:
@@ -54,6 +52,14 @@ def build_world(cfg: SimConfig, seed: int) -> World:
                 create_agent(world, occupation, town.id)
 
     _add_initial_acquaintances(world)
+    return world
+
+
+def empty_world(cfg: SimConfig, seed: int) -> World:
+    """A world with no nodes yet, but with its random generator and starting prices."""
+    world = World(cfg=cfg, seed=seed, rng=random.Random(seed))
+    world.prices = {"food": cfg.start_price_food, "ore": cfg.start_price_ore}
+    world.logged_prices = dict(world.prices)
     return world
 
 
