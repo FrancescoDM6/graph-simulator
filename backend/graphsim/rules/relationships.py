@@ -67,11 +67,12 @@ def enforce_attention_limit(world: World) -> None:
 
 
 def form_new_ties(world: World) -> None:
+    """Chance meetings and introductions, only between agents with room for another tie."""
     cfg = world.cfg
     for agent_id in list(world.agents):
-        if world.rng.random() < cfg.meet_chance:
+        if world.rng.random() < cfg.meet_chance and _has_room_for_tie(world, agent_id):
             _meet_townsperson(world, agent_id)
-        if world.rng.random() < cfg.intro_chance:
+        if world.rng.random() < cfg.intro_chance and _has_room_for_tie(world, agent_id):
             _introduce_friend_of_friend(world, agent_id)
 
 
@@ -204,7 +205,11 @@ def _meet_townsperson(world: World, agent_id: str) -> None:
     cfg = world.cfg
     home = world.agents[agent_id].home
     already_known = set(world.neighbors(agent_id, Layer.SOCIAL))
-    strangers = [a for a in world.agents_in_town(home) if a != agent_id and a not in already_known]
+    strangers = [
+        a
+        for a in world.agents_in_town(home)
+        if a != agent_id and a not in already_known and _has_room_for_tie(world, a)
+    ]
     if not strangers:
         return
     other = world.rng.choice(strangers)
@@ -229,7 +234,9 @@ def _introduce_friend_of_friend(world: World, agent_id: str) -> None:
     friend = world.rng.choice(close_friends)
     already_known = set(world.neighbors(agent_id, Layer.SOCIAL))
     candidates = [
-        f for f in _close_friends(world, friend) if f != agent_id and f not in already_known
+        f
+        for f in _close_friends(world, friend)
+        if f != agent_id and f not in already_known and _has_room_for_tie(world, f)
     ]
     if not candidates:
         return
