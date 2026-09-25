@@ -64,6 +64,7 @@ class SimConfig:
     distrusted_below: float = 0.25  # crossing this logs "lost trust"
     social_bump: float = 0.1  # social strength gained per interaction
     trade_bump: float = 0.2  # trade strength gained per successful trade
+    socialize_bump: float = 0.05  # strength gained when an agent spends a tick with a friend
     social_decay: float = 0.01  # fraction of social strength lost per idle tick
     trade_decay: float = 0.04
     prune_below: float = 0.05  # ties weaker than this disappear
@@ -82,6 +83,7 @@ class SimConfig:
     max_orgs: int = 6
 
     # --- Metrics and structural events -------------------------------------------------------
+    min_component_size: int = 3  # smaller connected groups (e.g. a lone newcomer) aren't counted
     min_community_size: int = 4
     community_match_jaccard: float = 0.3  # overlap needed to keep a community's label
     gini_window: int = 50

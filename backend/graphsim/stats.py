@@ -17,7 +17,7 @@ class TickMetrics:
     total_coin: float
     gini_coin: float
     social_density: float
-    social_components: int
+    social_components: int  # connected groups of at least cfg.min_component_size agents
     social_clustering: float
     communities: int
     avg_trust: float
@@ -46,3 +46,6 @@ class MetricsState:
     # Community label -> member ids, from the previous tick. Used to keep labels stable.
     communities: dict[int, set[str]] = field(default_factory=dict)
     next_community_label: int = 0
+    # The current top trade broker. Only replaced when someone clearly overtakes them.
+    top_broker: str = ""
+    last_inequality_event: int = -1_000_000  # tick, for spacing out "inequality rising" events
