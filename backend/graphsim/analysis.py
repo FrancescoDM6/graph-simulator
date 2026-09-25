@@ -114,11 +114,11 @@ def drought_trust_change(run: RunData) -> float:
     trust = dict(run.series.get("avg_trust", []))
     changes = []
     start_trust = None
-    for (_, was), (tick, now) in zip(drought, drought[1:], strict=False):
-        if now and not was:
-            start_trust = trust.get(tick)
-        if was and not now and start_trust is not None:
-            end_trust = trust.get(tick)
+    for (previous_tick, was), (_, now) in zip(drought, drought[1:], strict=False):
+        if now and not was:  # previous_tick is the last one before the drought
+            start_trust = trust.get(previous_tick)
+        if was and not now and start_trust is not None:  # previous_tick is its last drought tick
+            end_trust = trust.get(previous_tick)
             if end_trust is not None:
                 changes.append(end_trust - start_trust)
     return _mean(changes)

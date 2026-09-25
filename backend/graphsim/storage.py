@@ -88,6 +88,10 @@ create table if not exists run_measures (
     run_id integer, name text, value real,
     primary key (run_id, name)
 ) without rowid;
+create table if not exists experiment_runs (   -- which run answered each job of an experiment
+    experiment text, label text, seed integer, run_id integer,
+    primary key (experiment, label, seed)
+) without rowid;
 """
 
 LEVELS = ("summary", "full")  # a "full" run can stand in for a "summary" one, not vice versa
@@ -160,6 +164,16 @@ def write_batch(conn: sqlite3.Connection, run_id: int, batch: Batch) -> None:
         conn.execute("update runs set ticks_done = ? where id = ?", (batch.ticks_done, run_id))
 
 
+def assign_experiment_run(
+    conn: sqlite3.Connection, experiment: str, label: str, seed: int, run_id: int
+) -> None:
+    with conn:
+        conn.execute(
+            "insert or replace into experiment_runs values (?, ?, ?, ?)",
+            (experiment, label, seed, run_id),
+        )
+
+
 def set_status(conn: sqlite3.Connection, run_id: int, status: str) -> None:
     with conn:
         conn.execute("update runs set status = ? where id = ?", (status, run_id))
@@ -174,6 +188,7 @@ def delete_run(conn: sqlite3.Connection, run_id: int) -> None:
     with conn:
         for table in tables:
             conn.execute(f"delete from {table} where run_id = ?", (run_id,))
+        conn.execute("delete from experiment_runs where run_id = ?", (run_id,))
         conn.execute("delete from runs where id = ?", (run_id,))
 
 
@@ -368,6 +383,32 @@ def community_members(conn: sqlite3.Connection, run_id: int, tick: int) -> dict[
         (run_id, row["t"]),
     )
     return {r["community_id"]: json.loads(r["members"]) for r in rows}
+
+
+def experiment_runs(conn: sqlite3.Connection, experiment: str) -> list[dict[str, Any]]:
+    """(label, seed, run_id) for every job of the experiment that has a finished run."""
+    rows = conn.execute(
+        """select x.label, x.seed, x.run_id from experiment_runs x
+           join runs r on r.id = x.run_id
+           where x.experiment = ? and r.status = 'done' order by x.label, x.seed""",
+        (experiment,),
+    )
+    return [dict(row) for row in rows]
+
+
+def all_measures(conn: sqlite3.Connection, run_ids: list[int]) -> dict[int, dict[str, float]]:
+    """run id -> {measure: value} for many runs at once."""
+    result: dict[int, dict[str, float]] = {run_id: {} for run_id in run_ids}
+    for start in range(0, len(run_ids), 500):
+        chunk = run_ids[start : start + 500]
+        rows = conn.execute(
+            f"select run_id, name, value from run_measures "
+            f"where run_id in ({', '.join('?' for _ in chunk)})",
+            chunk,
+        )
+        for row in rows:
+            result[row["run_id"]][row["name"]] = row["value"]
+    return result
 
 
 def measures(conn: sqlite3.Connection, run_id: int) -> dict[str, float]:
