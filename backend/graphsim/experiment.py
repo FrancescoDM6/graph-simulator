@@ -3,6 +3,7 @@
     python -m graphsim.experiment ablations                # as defined in the file
     python -m graphsim.experiment ablations --seeds 1-20   # fewer seeds for a quick look
     python -m graphsim.experiment ablations --report       # just print the report again
+    python -m graphsim.experiment ablations --reanalyze    # recompute measures, then report
 
 Every (variant, seed) job becomes a stored run. Runs that already exist with identical settings
 and code are reused, so an interrupted experiment picks up where it stopped. Jobs run in
@@ -116,12 +117,19 @@ def main() -> None:
     parser.add_argument("--ticks", type=int, help="override the experiment's run length")
     parser.add_argument("--workers", type=int, help="parallel processes (default: all cores)")
     parser.add_argument("--report", action="store_true", help="only print the report")
+    parser.add_argument(
+        "--reanalyze",
+        action="store_true",
+        help="recompute the stored runs' measures (after changing analysis.py), then report",
+    )
     args = parser.parse_args()
 
-    if not args.report:
+    if not (args.report or args.reanalyze):
         seeds = parse_seeds(args.seeds) if args.seeds else None
         run_experiment(scenario, args.name, seeds, args.ticks, args.workers)
     conn = storage.connect(scenario.database)
+    if args.reanalyze:
+        report.reanalyze(conn, [a["run_id"] for a in storage.experiment_runs(conn, args.name)])
     result = report.build(conn, scenario, args.name)
     print(report.format_text(result, scenario))
     out = Path(scenario.database).parent / "experiments" / args.name

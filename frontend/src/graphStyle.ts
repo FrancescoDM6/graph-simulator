@@ -1,6 +1,7 @@
 // Every visual encoding lives in this file: how simulation state becomes size, colour and shape.
+// Occupation colours come from scenario.toml ([occupations.<name>] color).
 import type cytoscape from "cytoscape";
-import type { GraphEdge, GraphNode, Layer, Occupation } from "./types";
+import type { GraphEdge, GraphNode, Layer } from "./types";
 
 // Tableau 10: distinguishable categorical colours for communities.
 export const COMMUNITY_COLORS = [
@@ -8,13 +9,8 @@ export const COMMUNITY_COLORS = [
   "#b07aa1", "#ff9da7", "#9c755f", "#f28e2b", "#bab0ac",
 ];
 const NO_COMMUNITY_COLOR = "#5b606b";
-
-export const OCCUPATION_COLORS: Record<Occupation, string> = {
-  farmer: "#7bd88f",
-  miner: "#c9a27e",
-  merchant: "#f5d76e",
-};
-const STARVING_COLOR = "#ff4d4d";
+const UNKNOWN_OCCUPATION_COLOR = "#999999";
+export const STARVING_COLOR = "#ff4d4d";
 
 export const LAYER_COLORS: Record<Layer, string> = {
   social: "#6ea8fe",
@@ -25,12 +21,14 @@ export const LAYER_COLORS: Record<Layer, string> = {
 
 const RECENT_TRADE_TICKS = 20; // trade edges fade out over this many ticks without a trade
 
+export type OccupationColors = Record<string, string>;
+
 export function communityColor(community: number): string {
   return community < 0 ? NO_COMMUNITY_COLOR : COMMUNITY_COLORS[community % COMMUNITY_COLORS.length];
 }
 
 /** Data fields the stylesheet below reads, computed from a node's simulation state. */
-export function nodeData(node: GraphNode): Record<string, string | number> {
+export function nodeData(node: GraphNode, colors: OccupationColors): Record<string, string | number> {
   switch (node.kind) {
     case "agent":
       return {
@@ -40,7 +38,8 @@ export function nodeData(node: GraphNode): Record<string, string | number> {
         size: Math.min(60, 14 + 4 * Math.sqrt(Math.max(node.coin, 0))), // size = wealth
         fill: communityColor(node.community),
         border:
-          node.hunger_ticks > 0 ? STARVING_COLOR : (OCCUPATION_COLORS[node.occupation] ?? "#999999"),
+          node.hunger_ticks > 0 ? STARVING_COLOR : (colors[node.occupation] ?? UNKNOWN_OCCUPATION_COLOR),
+        community: node.community,
       };
     case "town":
       return { id: node.id, kind: node.kind, label: node.name, size: 46, fill: "#343944", border: "#8a90a0" };
@@ -50,7 +49,7 @@ export function nodeData(node: GraphNode): Record<string, string | number> {
         kind: node.kind,
         label: node.name,
         size: 26,
-        fill: node.site_kind === "farm" ? "#3f6b46" : "#55555f",
+        fill: "#48505e",
         border: node.stock < node.capacity * 0.1 ? STARVING_COLOR : "#8a90a0", // red = depleted
       };
     case "org":
@@ -134,10 +133,3 @@ export const stylesheet: cytoscape.StylesheetJson = [
     style: { "border-width": 5, "border-color": "#ffffff", "overlay-opacity": 0 },
   },
 ];
-
-/** Rows for the on-screen legend. */
-export const LEGEND = {
-  occupations: Object.entries(OCCUPATION_COLORS) as [Occupation, string][],
-  layers: Object.entries(LAYER_COLORS) as [Layer, string][],
-  starving: STARVING_COLOR,
-};

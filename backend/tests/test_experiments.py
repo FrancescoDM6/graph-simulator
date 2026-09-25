@@ -87,6 +87,7 @@ def test_measures_on_a_synthetic_run():
             "population": [(t, 30.0 - (t == 15) * 6) for t in range(30)],
         },
         communities=[
+            {"born": 1, "died": None, "mean_turnover": 0.0, "continuations": 29},  # founding
             {"born": 5, "died": 7, "mean_turnover": 0.5, "continuations": 2},  # flicker
             {"born": 5, "died": None, "mean_turnover": 0.1, "continuations": 20},
         ],

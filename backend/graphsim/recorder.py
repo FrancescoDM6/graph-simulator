@@ -22,7 +22,9 @@ class Recorder:
         self.founding = set(world.agents)
         self.lifetimes: dict[str, list] = {}  # agent id -> row for the agents table
         self.changed_lifetimes: dict[str, None] = {}  # rows to (re)write at the next flush
-        self.stored_metrics: dict[str, list[tuple[int, float]]] = {}  # for the final measures
+        # Every tick's metrics, kept in memory for the run's measures, so a run's measures don't
+        # depend on how often its metrics are stored.
+        self.all_metrics: dict[str, list[tuple[int, float]]] = {}
         self.detections_seen = 0
         self._note_arrivals()
         if spec.snapshots:
@@ -31,6 +33,9 @@ class Recorder:
     def after_tick(self, events: list[Event]) -> None:
         world, spec = self.world, self.spec
         tick = world.tick
+        for name, value in world.metrics.history[-1].items():
+            if name != "tick":
+                self.all_metrics.setdefault(name, []).append((tick, float(value)))
         self._note_arrivals()
         self._record_events(events)
         if tick == 1 or tick % spec.metrics_every == 0:
@@ -75,7 +80,7 @@ class Recorder:
         ]  # fmt: skip
         batch.measures = analysis.compute_measures(
             analysis.RunData(
-                series=self.stored_metrics,
+                series=self.all_metrics,
                 communities=records,
                 event_counts=_count_kinds(world.log.events),
                 ticks=world.tick,
@@ -120,7 +125,6 @@ class Recorder:
             if name == "tick":
                 continue
             self.batch.metrics.append((tick, name, float(value)))
-            self.stored_metrics.setdefault(name, []).append((tick, float(value)))
 
     def _record_agents(self) -> None:
         world = self.world

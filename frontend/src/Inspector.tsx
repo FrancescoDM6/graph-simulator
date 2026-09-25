@@ -1,77 +1,63 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchHistory } from "./api";
+import { useEffect, useState } from "react";
+import { api } from "./api";
+import { LineChart } from "./charts/LineChart";
+import { formatNumber } from "./format";
 import { communityColor, LAYER_COLORS } from "./graphStyle";
-import { LAYERS, type GraphEdge, type GraphNode, type SimEvent, type Snapshot } from "./types";
+import {
+  type AgentTick,
+  type GraphEdge,
+  type GraphNode,
+  LAYERS,
+  type Series,
+  type SimEvent,
+  type Snapshot,
+  type TrustEntry,
+} from "./types";
+
+const TRUST_WINDOW = 5; // clicking the trust chart lists changes from this many ticks before
 
 interface Props {
+  runId: number;
   snapshot: Snapshot;
   selectedId: string | null;
+  lastTick: number;
+  droughts: [number, number][];
+  stapleGood: string; // the good shown in the agent's charts (the first eaten good)
   onSelect: (id: string) => void;
+  onJump: (tick: number) => void;
+  onWhy: (eventId: number) => void;
 }
 
-/** Current state, relationships and full history of the selected node. */
-export function Inspector({ snapshot, selectedId, onSelect }: Props) {
-  const history = useHistory(snapshot, selectedId);
+/** The selected node at the cursor: its state, charts of its whole life, relationships and
+ * history. */
+export function Inspector(props: Props) {
+  const { runId, snapshot, selectedId, onSelect } = props;
   const nodesById = new Map(snapshot.nodes.map((n) => [n.id, n]));
   const name = (id: string) => nodesById.get(id)?.name ?? id;
 
   if (!selectedId) {
     return (
       <aside className="inspector muted">
-        Click a node to see its state, relationships and history.
+        Click a node to see its state, its whole life in charts, its relationships and its history.
       </aside>
     );
   }
   const node = nodesById.get(selectedId);
-
   return (
     <aside className="inspector">
       {node ? (
         <>
           <h2>{node.name}</h2>
           <NodeState node={node} name={name} />
+          {node.kind === "agent" && <AgentCharts {...props} agentId={node.id} />}
           <Relationships node={node} edges={snapshot.edges} name={name} onSelect={onSelect} />
         </>
       ) : (
-        <h2 className="muted">No longer in the world</h2>
+        <h2 className="muted">Not in the world at tick {snapshot.tick}</h2>
       )}
-      <h3>History</h3>
-      <ol className="history">
-        {[...history].reverse().map((event, i) => (
-          <li key={`${event.tick}-${i}`}>
-            <span className="event-tick">Tick {event.tick}</span>
-            <div>{event.message}</div>
-            {event.cause && <div className="event-cause">{event.cause}</div>}
-          </li>
-        ))}
-        {history.length === 0 && <li className="muted">Nothing has happened yet.</li>}
-      </ol>
+      <History runId={runId} entityId={selectedId} cursor={snapshot.tick} onJump={props.onJump} onWhy={props.onWhy} />
     </aside>
   );
-}
-
-/** Loads the node's history, and reloads it whenever a new tick mentions the node. */
-function useHistory(snapshot: Snapshot, selectedId: string | null): SimEvent[] {
-  const [history, setHistory] = useState<SimEvent[]>([]);
-  const latestRequest = useRef(0);
-  const mentionedThisTick =
-    selectedId !== null && snapshot.events.some((e) => e.subjects.includes(selectedId));
-
-  useEffect(() => {
-    if (!selectedId) {
-      setHistory([]);
-      return;
-    }
-    const request = ++latestRequest.current;
-    fetchHistory(selectedId)
-      .then((events) => {
-        if (request === latestRequest.current) setHistory(events); // ignore stale responses
-      })
-      .catch(() => setHistory([]));
-    // Reload on a new selection, on a new world (seed/reset), or when this tick mentions the node.
-  }, [selectedId, snapshot.seed, mentionedThisTick ? snapshot.tick : -1]);
-
-  return history;
 }
 
 function NodeState({ node, name }: { node: GraphNode; name: (id: string) => string }) {
@@ -88,11 +74,13 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
             .join(" · "),
         ],
         ["Needs", node.need || "nothing"],
-        ["Hungry for", node.hunger_ticks ? `${node.hunger_ticks} ticks` : "—"],
-        ["Organization", node.org ? name(node.org) : "—"],
+        ["Hungry for", node.hunger_ticks ? `${node.hunger_ticks} ticks` : "–"],
+        ["Organization", node.org ? name(node.org) : "–"],
         [
           "Community",
-          node.community < 0 ? "—" : (
+          node.community < 0 ? (
+            "–"
+          ) : (
             <span>
               <span className="dot" style={{ background: communityColor(node.community) }} />
               {node.community}
@@ -122,6 +110,98 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
         </div>
       ))}
     </dl>
+  );
+}
+
+/** Coin, staple food, trust and brokerage over the agent's whole life. Clicking the trust
+ * chart lists the trust changes just before that tick, each with its cause. */
+function AgentCharts({
+  runId,
+  agentId,
+  snapshot,
+  lastTick,
+  droughts,
+  stapleGood,
+  onJump,
+  onWhy,
+}: Props & { agentId: string }) {
+  const [history, setHistory] = useState<AgentTick[]>([]);
+  const [trustTick, setTrustTick] = useState<number | null>(null);
+  const [trust, setTrust] = useState<TrustEntry[]>([]);
+
+  useEffect(() => {
+    setHistory([]);
+    setTrustTick(null);
+    api.agentHistory(runId, agentId).then((h) => setHistory(h.ticks));
+  }, [runId, agentId]);
+
+  useEffect(() => {
+    if (trustTick === null) return;
+    api.trust(runId, agentId, trustTick - TRUST_WINDOW, trustTick).then(setTrust);
+  }, [runId, agentId, trustTick]);
+
+  const series = (value: (t: AgentTick) => number | null): Series =>
+    history.flatMap((t) => {
+      const v = value(t);
+      return v === null ? [] : [[t.tick, v] as [number, number]];
+    });
+  const chart = (label: string, color: string, data: Series, onPick = onJump) => (
+    <LineChart
+      label={label}
+      color={color}
+      a={data}
+      lastTick={lastTick}
+      droughts={droughts}
+      cursor={snapshot.tick}
+      onPick={onPick}
+      height={56}
+    />
+  );
+  const other = (entry: TrustEntry) => (entry.a === agentId ? entry.b : entry.a);
+  const nameOf = (id: string) => snapshot.nodes.find((n) => n.id === id)?.name ?? id;
+
+  return (
+    <>
+      <h3>Over time</h3>
+      {history.length === 0 && <div className="muted small">No per-tick history stored for this run.</div>}
+      {history.length > 0 && (
+        <div className="agent-charts">
+          {chart("Coin", "#f5d76e", series((t) => t.coin))}
+          {chart(stapleGood, "#7bd88f", series((t) => t.inventory[stapleGood] ?? 0))}
+          {chart("Mean trust (click for causes)", "#6ea8fe", series((t) => t.mean_trust), (tick) => {
+            onJump(tick);
+            setTrustTick(tick);
+          })}
+          {chart("Broker score", "#f0a04b", series((t) => t.betweenness))}
+        </div>
+      )}
+      {trustTick !== null && (
+        <div className="trust-ledger">
+          <div className="small">
+            Trust changes, ticks {trustTick - TRUST_WINDOW}–{trustTick}{" "}
+            <button className="link small" onClick={() => setTrustTick(null)}>
+              hide
+            </button>
+          </div>
+          {trust.length === 0 && <div className="muted small">None.</div>}
+          <ul>
+            {trust.map((entry, i) => (
+              <li key={i}>
+                <span className="event-tick">{entry.tick}</span>
+                <span className={entry.after >= entry.before ? "up" : "down"}>
+                  {formatNumber(entry.before)} → {formatNumber(entry.after)}
+                </span>{" "}
+                with {nameOf(other(entry))}
+                {entry.event && <span className="event-cause"> {entry.event.message}</span>}
+                <button className="link small why" onClick={() => onWhy(entry.event_id)}>
+                  why?
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -171,6 +251,50 @@ function Relationships({
           </div>
         );
       })}
+    </>
+  );
+}
+
+/** Everything that happened to the node up to the cursor, newest first. */
+function History({
+  runId,
+  entityId,
+  cursor,
+  onJump,
+  onWhy,
+}: {
+  runId: number;
+  entityId: string;
+  cursor: number;
+  onJump: (tick: number) => void;
+  onWhy: (eventId: number) => void;
+}) {
+  const [events, setEvents] = useState<SimEvent[]>([]);
+  useEffect(() => {
+    setEvents([]);
+    api.events(runId, { entity: entityId, limit: 5000 }).then(setEvents);
+  }, [runId, entityId]);
+  const upToCursor = events.filter((e) => e.tick <= cursor).reverse();
+  return (
+    <>
+      <h3>History</h3>
+      <ol className="history">
+        {upToCursor.map((event) => (
+          <li key={event.id}>
+            <button className="event-tick link" onClick={() => onJump(event.tick)}>
+              Tick {event.tick}
+            </button>
+            <div>{event.message}</div>
+            {event.cause && <div className="event-cause">{event.cause}</div>}
+            {event.caused_by.length > 0 && (
+              <button className="link small why" onClick={() => onWhy(event.id)}>
+                why?
+              </button>
+            )}
+          </li>
+        ))}
+        {upToCursor.length === 0 && <li className="muted">Nothing has happened yet.</li>}
+      </ol>
     </>
   );
 }

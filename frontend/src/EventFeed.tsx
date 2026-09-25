@@ -1,61 +1,95 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "./api";
 import type { SimEvent } from "./types";
+
+const WINDOW = 100; // show events from this many ticks before the cursor up to it
+const REFETCH_DELAY_MS = 250; // wait for the cursor to settle before fetching
 
 // Events about the network as a whole, rather than one relationship.
 const STRUCTURAL_KINDS = new Set([
-  "community_formed",
-  "community_dissolved",
-  "network_split",
-  "network_merged",
-  "inequality_rising",
-  "new_top_broker",
-  "drought_started",
-  "drought_ended",
-  "price_rose",
-  "price_fell",
-  "founded_org",
-  "org_dissolved",
+  "community_formed", "community_split", "community_merged", "community_dissolved",
+  "network_split", "network_merged", "inequality_rising", "new_top_broker",
+  "drought_started", "drought_ended", "price_rose", "price_fell", "founded_org", "org_dissolved",
 ]);
 
 interface Props {
-  events: SimEvent[]; // newest first
-  liveIds: Set<string>; // nodes currently in the world (others can't be selected)
+  runId: number;
+  cursor: number;
+  liveIds: Set<string>; // nodes present at the cursor (others can't be selected)
   onSelect: (id: string) => void;
+  onJump: (tick: number) => void;
+  onWhy: (eventId: number) => void;
 }
 
-export function EventFeed({ events, liveIds, onSelect }: Props) {
+/** The events leading up to the cursor, newest first. */
+export function EventFeed({ runId, cursor, liveIds, onSelect, onJump, onWhy }: Props) {
+  const [events, setEvents] = useState<SimEvent[]>([]);
   const [structuralOnly, setStructuralOnly] = useState(false);
-  const shown = structuralOnly ? events.filter((e) => STRUCTURAL_KINDS.has(e.kind)) : events;
+  const [withDetail, setWithDetail] = useState(false);
 
+  useEffect(() => {
+    let stale = false;
+    const timer = window.setTimeout(() => {
+      api
+        .events(runId, { first: Math.max(0, cursor - WINDOW), last: cursor, detail: withDetail, limit: 2000 })
+        .then((found) => !stale && setEvents(found.reverse()));
+    }, REFETCH_DELAY_MS);
+    return () => {
+      stale = true;
+      window.clearTimeout(timer);
+    };
+  }, [runId, cursor, withDetail]);
+
+  const shown = structuralOnly ? events.filter((e) => STRUCTURAL_KINDS.has(e.kind)) : events;
   return (
     <section className="event-feed">
       <div className="panel-header">
-        <span>Events</span>
-        <label>
-          <input
-            type="checkbox"
-            checked={structuralOnly}
-            onChange={(e) => setStructuralOnly(e.target.checked)}
-          />{" "}
-          network-level only
-        </label>
+        <span>
+          Events <span className="muted">(ticks {Math.max(0, cursor - WINDOW)}–{cursor})</span>
+        </span>
+        <span className="header-options">
+          <label>
+            <input type="checkbox" checked={structuralOnly} onChange={(e) => setStructuralOnly(e.target.checked)} />{" "}
+            network-level only
+          </label>
+          <label>
+            <input type="checkbox" checked={withDetail} onChange={(e) => setWithDetail(e.target.checked)} /> every
+            trade attempt
+          </label>
+        </span>
       </div>
       <ol className="event-list">
-        {shown.map((event, i) => {
+        {shown.map((event) => {
           const target = event.subjects.find((id) => liveIds.has(id));
           return (
             <li
-              key={`${event.tick}-${i}`}
-              className={`event ${STRUCTURAL_KINDS.has(event.kind) ? "structural" : ""} ${target ? "clickable" : ""}`}
-              onClick={() => target && onSelect(target)}
+              key={event.id}
+              className={[
+                "event",
+                STRUCTURAL_KINDS.has(event.kind) ? "structural" : "",
+                event.detail ? "detail" : "",
+                event.tick === cursor ? "now" : "",
+              ].join(" ")}
             >
-              <span className="event-tick">{event.tick}</span>
-              <span className="event-message">{event.message}</span>
+              <button className="event-tick link" onClick={() => onJump(event.tick)} title="go to this tick">
+                {event.tick}
+              </button>
+              <span
+                className={`event-message ${target ? "clickable" : ""}`}
+                onClick={() => target && onSelect(target)}
+              >
+                {event.message}
+              </span>
               {event.cause && <span className="event-cause">{event.cause}</span>}
+              {event.caused_by.length > 0 && (
+                <button className="link small why" onClick={() => onWhy(event.id)}>
+                  why?
+                </button>
+              )}
             </li>
           );
         })}
-        {shown.length === 0 && <li className="muted">Nothing yet.</li>}
+        {shown.length === 0 && <li className="muted">Nothing in this window.</li>}
       </ol>
     </section>
   );

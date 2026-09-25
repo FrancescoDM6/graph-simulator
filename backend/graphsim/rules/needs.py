@@ -26,9 +26,16 @@ def consume(world: World) -> None:
 
         agent.hunger_ticks += 1
         if agent.hunger_ticks == cfg.population.starving_notice_after:
-            # Why: the purchases that failed during this hungry spell, and any drought.
+            # Why: the agent's own purchases that failed during this hungry spell, and any
+            # drought. (Its failures as a buyer only: the buyer is always the first subject.)
             episode_start = world.tick - agent.hunger_ticks
-            failures = world.log.recent(agent.id, FAILED_PURCHASE_KINDS, since_tick=episode_start)
+            failures = [
+                e
+                for e in world.log.recent(
+                    agent.id, FAILED_PURCHASE_KINDS, since_tick=episode_start, limit=50
+                )
+                if e.subjects[0] == agent.id
+            ][:3]
             world.log.add(
                 world.tick,
                 "starving",

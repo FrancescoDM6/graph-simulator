@@ -1,71 +1,71 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Command, SimEvent, Snapshot } from "./types";
+// Every call the viewer makes to the backend (backend/graphsim/server.py).
+import type {
+  AgentLifetime,
+  AgentTick,
+  CommunityRow,
+  ExperimentReport,
+  RunInfo,
+  Scenario,
+  Series,
+  SimEvent,
+  Snapshot,
+  TrailNode,
+  TrustEntry,
+} from "./types";
 
-const RECONNECT_DELAY_MS = 1000;
-const EVENT_FEED_LENGTH = 300; // how many recent events the feed keeps
-
-export interface SimulationConnection {
-  snapshot: Snapshot | null;
-  connected: boolean;
-  recentEvents: SimEvent[]; // newest first
-  send: (command: Command) => void;
+async function get<T>(path: string, params: Record<string, string | number | boolean | undefined> = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const response = await fetch(`/api${path}${query.size ? `?${query}` : ""}`);
+  if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
+  return (await response.json()) as T;
 }
 
-/** Keeps a WebSocket open to the server and exposes the latest snapshot. */
-export function useSimulation(): SimulationConnection {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [recentEvents, setRecentEvents] = useState<SimEvent[]>([]);
-  const socketRef = useRef<WebSocket | null>(null);
-  const lastTickRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    let stopped = false;
-    let retryTimer: number | undefined;
-
-    function connect() {
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
-      socketRef.current = socket;
-      socket.onopen = () => setConnected(true);
-      socket.onclose = () => {
-        setConnected(false);
-        if (!stopped) retryTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
-      };
-      socket.onmessage = (message) => {
-        const next: Snapshot = JSON.parse(message.data);
-        // Snapshots are also re-sent after pause/speed changes; only a new tick brings new events.
-        const isNewTick = next.tick !== lastTickRef.current;
-        const isReset = lastTickRef.current !== null && next.tick < lastTickRef.current;
-        lastTickRef.current = next.tick;
-        if (isReset) setRecentEvents([]);
-        if (isNewTick && next.events.length > 0) {
-          const newestFirst = [...next.events].reverse();
-          setRecentEvents((old) => [...newestFirst, ...old].slice(0, EVENT_FEED_LENGTH));
-        }
-        setSnapshot(next);
-      };
-    }
-
-    connect();
-    return () => {
-      stopped = true;
-      window.clearTimeout(retryTimer);
-      socketRef.current?.close();
-    };
-  }, []);
-
-  const send = useCallback((command: Command) => {
-    const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(command));
-  }, []);
-
-  return { snapshot, connected, recentEvents, send };
+async function post<T>(path: string, body?: unknown) {
+  const response = await fetch(`/api${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(detail.detail ?? String(response.status));
+  }
+  return (await response.json()) as T;
 }
 
-/** Every event the server has logged for one node (agent, town, site or org). */
-export async function fetchHistory(entityId: string): Promise<SimEvent[]> {
-  const response = await fetch(`/api/entities/${encodeURIComponent(entityId)}/history`);
-  if (!response.ok) throw new Error(`history request failed: ${response.status}`);
-  return response.json();
-}
+export const api = {
+  scenario: () => get<Scenario>("/scenario"),
+  runs: () => get<RunInfo[]>("/runs"),
+  run: (id: number) => get<RunInfo>(`/runs/${id}`),
+  startRun: (request: { seed: number; ticks: number; variant: string; overrides: Record<string, unknown>; label: string }) =>
+    post<RunInfo>("/runs", request),
+  materialize: (id: number) => post<RunInfo>(`/runs/${id}/materialize`),
+  metrics: (id: number, names: string[]) =>
+    get<{ names: string[]; series: Record<string, Series> }>(`/runs/${id}/metrics`, { names: names.join(",") }),
+  snapshots: (id: number, first: number, count: number) =>
+    get<Snapshot[]>(`/runs/${id}/snapshots`, { first, count }),
+  events: (
+    id: number,
+    options: { first?: number; last?: number; entity?: string; detail?: boolean; kinds?: string[]; limit?: number },
+  ) =>
+    get<SimEvent[]>(`/runs/${id}/events`, {
+      first: options.first,
+      last: options.last,
+      entity: options.entity,
+      detail: options.detail,
+      kinds: options.kinds?.join(","),
+      limit: options.limit,
+    }),
+  trail: (id: number, eventId: number, depth = 3) =>
+    get<TrailNode>(`/runs/${id}/events/${eventId}/trail`, { depth }),
+  agentHistory: (id: number, agentId: string) =>
+    get<{ lifetime: AgentLifetime | null; ticks: AgentTick[] }>(`/runs/${id}/agents/${encodeURIComponent(agentId)}/history`),
+  trust: (id: number, agent: string, first: number, last: number) =>
+    get<TrustEntry[]>(`/runs/${id}/trust`, { agent, first, last }),
+  communities: (id: number) =>
+    get<{ communities: CommunityRow[]; sizes: Record<string, [number, number][]> }>(`/runs/${id}/communities`),
+  experiment: (name: string) => get<ExperimentReport>(`/experiments/${encodeURIComponent(name)}`),
+};

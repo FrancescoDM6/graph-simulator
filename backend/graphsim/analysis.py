@@ -73,11 +73,17 @@ def ratio(a: float, b: float) -> float:
     return (a + RATIO_FLOOR) / (b + RATIO_FLOOR)
 
 
+def born_later(run: RunData) -> list[dict]:
+    """Communities that formed during the run (not the ones found at the first detection)."""
+    if not run.communities:
+        return []
+    first_detection = min(c["born"] for c in run.communities)
+    return [c for c in run.communities if c["born"] > first_detection]
+
+
 def real_communities(run: RunData) -> list[dict]:
-    """Communities that lived long enough not to be detection flicker."""
-    return [
-        c for c in run.communities if _lifespan(c, run.ticks) >= run.min_lifespan and c["born"] > 0
-    ]
+    """Communities formed during the run that lived long enough not to be detection flicker."""
+    return [c for c in born_later(run) if _lifespan(c, run.ticks) >= run.min_lifespan]
 
 
 def _lifespan(community: dict, now: int) -> int:
@@ -130,11 +136,9 @@ def community_median_lifespan(run: RunData) -> float:
 
 
 def community_flicker_share(run: RunData) -> float:
-    """Share of detected communities (after tick 0) that were too short-lived to be real."""
-    born_later = [c for c in run.communities if c["born"] > 0]
-    if not born_later:
-        return 0.0
-    return 1 - len(real_communities(run)) / len(born_later)
+    """Share of communities formed during the run that were too short-lived to be real."""
+    formed = born_later(run)
+    return 1 - len(real_communities(run)) / len(formed) if formed else 0.0
 
 
 def community_turnover(run: RunData) -> float:

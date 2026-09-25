@@ -62,6 +62,17 @@ def test_starving_during_a_drought_can_be_traced_to_the_drought():
     assert all(drought.id in e.caused_by for e in starving_in_drought)
 
 
+def test_starving_points_only_at_the_agents_own_failed_purchases():
+    world, _ = run()
+    for event in world.log.events:
+        if event.kind != "starving":
+            continue
+        for cause_id in event.caused_by:
+            cause = world.log.get(cause_id)
+            if cause.kind != "drought_started":
+                assert cause.subjects[0] == event.subjects[0], (event, cause)
+
+
 def test_gifts_are_logged_once_and_lead_back_to_a_starving_agent():
     world, _ = run()
     gifts = [e for e in world.log.events if e.kind == "gift"]

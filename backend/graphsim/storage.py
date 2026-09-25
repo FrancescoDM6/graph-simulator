@@ -115,14 +115,22 @@ class Batch:
     measures: dict[str, float] = field(default_factory=dict)  # only in the final batch
 
 
+_prepared: set[Path] = set()  # databases whose schema this process has already set up
+
+
 def connect(path: Path | str) -> sqlite3.Connection:
-    path = Path(path)
+    path = Path(path).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("pragma journal_mode = wal")  # readers aren't blocked by a run being written
     conn.execute("pragma synchronous = normal")
-    conn.executescript(SCHEMA)
+    if path not in _prepared:
+        # Setting up the schema needs a write lock, so do it once per process: otherwise every
+        # reader would queue behind whoever is writing (e.g. an experiment filling the database).
+        if conn.execute("pragma journal_mode").fetchone()[0] != "wal":
+            conn.execute("pragma journal_mode = wal")  # readers aren't blocked by a writer
+        conn.executescript(SCHEMA)
+        _prepared.add(path)
     return conn
 
 

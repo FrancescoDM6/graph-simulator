@@ -11,12 +11,13 @@ Three views of the same stored runs:
 """
 
 import csv
+import json
 import math
 from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-from graphsim import storage
+from graphsim import analysis, storage
 from graphsim.config import Scenario
 
 BASELINE = "baseline"
@@ -80,6 +81,28 @@ def build(conn, scenario: Scenario, experiment: str) -> dict[str, Any]:
         "summary": summary,
         "paired": paired,
     }
+
+
+def reanalyze(conn, run_ids: list[int]) -> None:
+    """Recomputes stored runs' measures from the database, e.g. after changing a measure's
+    definition in analysis.py, without re-running anything. Summary-level runs only stored their
+    metrics every few ticks, so their recomputed measures are close to, not exactly, the ones
+    computed while they ran."""
+    for run_id in run_ids:
+        row = conn.execute("select ticks, config_json from runs where id = ?", (run_id,)).fetchone()
+        min_lifespan = json.loads(row["config_json"])["metrics"]["community_min_lifespan"]
+        data = analysis.RunData(
+            series=storage.metric_series(conn, run_id),
+            communities=storage.communities(conn, run_id),
+            event_counts=storage.event_counts(conn, run_id),
+            ticks=row["ticks"],
+            min_lifespan=min_lifespan,
+        )
+        storage.write_batch(
+            conn,
+            run_id,
+            storage.Batch(ticks_done=row["ticks"], measures=analysis.compute_measures(data)),
+        )
 
 
 def wilson_interval(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:

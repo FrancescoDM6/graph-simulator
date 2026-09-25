@@ -1,25 +1,83 @@
-// Shapes of the messages the server sends. These mirror backend/graphsim/serialize.py and
-// backend/graphsim/stats.py (TickMetrics) — change both sides together.
+// Shapes of what the API returns. These mirror backend/graphsim/server.py, storage.py and
+// serialize.py; change both sides together.
 
 export type Layer = "social" | "trade" | "membership" | "access";
 export const LAYERS: Layer[] = ["social", "trade", "membership", "access"];
 
-export type Occupation = string; // keys of [occupations] in scenario.toml
+// --- scenario.toml, as described by GET /api/scenario ----------------------------------------
+
+export interface OccupationSpec {
+  works_at: string;
+  output: number;
+  tool: string;
+  brokers: boolean;
+  reach: string;
+  color: string;
+}
+
+export interface GoodSpec {
+  eaten_per_tick: number;
+  reserve: number;
+}
+
+export interface TimelineSeries {
+  metric: string;
+  label: string;
+  color: string;
+}
+
+export interface PhenomenonSpec {
+  description: string;
+  measure: string;
+  present_if: string;
+}
+
+export interface Scenario {
+  name: string;
+  seed: number;
+  ticks: number;
+  goods: Record<string, GoodSpec>;
+  occupations: Record<string, OccupationSpec>;
+  mechanisms: Record<string, boolean | string>;
+  mechanism_choices: Record<string, string[]>;
+  variants: Record<string, string>; // name -> description
+  experiments: Record<string, { description: string; seeds: number; variants: string[]; ticks: number }>;
+  phenomena: Record<string, PhenomenonSpec>;
+  timeline: TimelineSeries[];
+}
+
+// --- runs -------------------------------------------------------------------------------------
+
+export interface RunInfo {
+  id: number;
+  created: string;
+  variant: string;
+  overrides: Record<string, unknown>;
+  seed: number;
+  ticks: number;
+  level: "summary" | "full";
+  experiment: string;
+  label: string;
+  status: "running" | "done" | "failed";
+  ticks_done: number;
+}
+
+export type Series = [number, number][]; // [tick, value][]
 
 export interface AgentNode {
   id: string;
   kind: "agent";
   name: string;
-  occupation: Occupation;
+  occupation: string;
   home: string;
-  inventory: Record<string, number>; // good -> amount held
+  inventory: Record<string, number>;
   coin: number;
   hunger_ticks: number;
   need: string;
   org: string | null;
   arrived: number;
-  community: number; // -1 = not in any community
-  betweenness: number; // trade-layer betweenness centrality
+  community: number; // -1 = none
+  betweenness: number;
   degree: number;
 }
 
@@ -34,7 +92,7 @@ export interface SiteNode {
   id: string;
   kind: "site";
   name: string;
-  site_kind: "farm" | "mine";
+  site_kind: string;
   stock: number;
   capacity: number;
 }
@@ -56,40 +114,130 @@ export interface GraphEdge {
   target: string;
   layer: Layer;
   strength: number;
-  trust: number | null; // social layer only
+  trust: number | null;
   created: number;
   last_active: number;
 }
 
-export interface SimEvent {
-  tick: number;
-  kind: string;
-  subjects: string[];
-  message: string;
-  cause: string;
-}
-
-// Metric name -> value, e.g. "gini_coin", "population.farmer", "stock.food", "price.ore".
-// Names come from backend/graphsim/metrics.py (_tick_metrics).
+// Metric name -> value, e.g. "gini_coin", "population.farmer", "stock.food".
 export type TickMetrics = Record<string, number>;
 
 export interface Snapshot {
   tick: number;
   seed: number;
   drought: boolean;
-  prices: { food: number; ore: number };
+  prices: Record<string, number>;
   nodes: GraphNode[];
   edges: GraphEdge[];
   metrics: TickMetrics | null;
   top_broker: string;
-  events: SimEvent[]; // events from this tick only
-  running: boolean;
-  ticks_per_second: number;
 }
 
-export type Command =
-  | { command: "play" }
-  | { command: "pause" }
-  | { command: "step" }
-  | { command: "set_speed"; ticks_per_second: number }
-  | { command: "reset"; seed: number };
+export interface SimEvent {
+  id: number;
+  tick: number;
+  kind: string;
+  subjects: string[];
+  message: string;
+  cause: string;
+  detail: boolean;
+  caused_by: number[];
+}
+
+// A causal trail: an event with its causes nested. `causes` is null when not expanded yet.
+export interface TrailNode extends Partial<SimEvent> {
+  id: number;
+  missing?: boolean; // the cause wasn't stored (summary-level run)
+  causes?: TrailNode[] | null;
+}
+
+export interface AgentTick {
+  tick: number;
+  occupation: string;
+  org: string | null;
+  community: number;
+  coin: number;
+  inventory: Record<string, number>;
+  mean_trust: number | null;
+  social_ties: number;
+  trade_ties: number;
+  betweenness: number;
+  bought: number;
+  sold: number;
+  brokered: number;
+  gifts_given: number;
+  gifts_received: number;
+  hunger: number;
+}
+
+export interface AgentLifetime {
+  agent_id: string;
+  name: string;
+  occupation: string;
+  home: string;
+  arrived: number;
+  departed: number | null;
+  departure_event: number | null;
+  founding: number;
+}
+
+export interface TrustEntry {
+  tick: number;
+  a: string;
+  b: string;
+  before: number;
+  after: number;
+  event_id: number;
+  event: SimEvent | null;
+}
+
+export interface CommunityRow {
+  community_id: number;
+  born: number;
+  died: number | null;
+  fate: "alive" | "merged" | "split" | "dissolved";
+  parent: number | null;
+  merged_into: number | null;
+  peak_size: number;
+  members_ever: number;
+  mean_turnover: number;
+  continuations: number;
+}
+
+// --- experiments ------------------------------------------------------------------------------
+
+export interface ExperimentRun {
+  label: string;
+  seed: number;
+  run_id: number;
+  measures: Record<string, number>;
+  present: Record<string, boolean>;
+}
+
+export interface SummaryRow {
+  label: string;
+  measure: string; // a measure name, or "present:<phenomenon>"
+  n: number;
+  mean: number | null;
+  median: number | null;
+  p5: number | null; // for presence rows: the 95% interval's lower bound
+  p95: number | null;
+}
+
+export interface PairedRow {
+  label: string;
+  measure: string;
+  n: number;
+  median_diff: number | null;
+  mean_diff: number | null;
+  same_sign: number | null;
+}
+
+export interface ExperimentReport {
+  experiment: string;
+  baseline: string | null;
+  labels: string[];
+  runs: ExperimentRun[];
+  summary: SummaryRow[];
+  paired: PairedRow[];
+}
