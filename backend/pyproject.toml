@@ -1,0 +1,30 @@
+[project]
+name = "graphsim"
+version = "0.1.0"
+description = "A simulation whose world is an evolving graph"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "networkx>=3.3",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+# This is an application, not a library: run it from this folder, don't install it.
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
