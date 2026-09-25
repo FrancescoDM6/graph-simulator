@@ -4,6 +4,8 @@ NetworkX is used only here, on throwaway graphs built from the World each tick. 
 describe the simulation; they never feed back into agent decisions.
 """
 
+import math
+from collections import Counter
 from statistics import mean
 
 import networkx as nx
@@ -39,6 +41,21 @@ def record_tick(world: World) -> None:
         _detect_component_change(world, int(before), int(after))
         _detect_inequality_jump(world, metrics["gini_coin"])
     history.append(metrics)
+
+
+def normalized_mutual_information(a: list, b: list) -> float:
+    """How much two groupings of the same items agree: 1 = identical groupings (up to naming),
+    0 = knowing one tells you nothing about the other. Arithmetic-mean normalization."""
+    n = len(a)
+    if n == 0:
+        return 0.0
+    count_a, count_b, joint = Counter(a), Counter(b), Counter(zip(a, b, strict=True))
+    entropy_a = -sum(c / n * math.log(c / n) for c in count_a.values())
+    entropy_b = -sum(c / n * math.log(c / n) for c in count_b.values())
+    if entropy_a == 0 or entropy_b == 0:
+        return 1.0 if entropy_a == entropy_b else 0.0  # one side is a single group
+    mutual = sum(c / n * math.log(c * n / (count_a[x] * count_b[y])) for (x, y), c in joint.items())
+    return mutual / ((entropy_a + entropy_b) / 2)
 
 
 def gini(values: list[float]) -> float:
@@ -106,9 +123,19 @@ def _tick_metrics(
                 round(broker_betweenness / total_betweenness, 4) if total_betweenness else 0.0
             ),
             "broker_population_share": round(len(brokers) / len(agents), 4) if agents else 0.0,
+            "community_town_alignment": round(_community_town_alignment(world), 4),
         }
     )
     return metrics
+
+
+def _community_town_alignment(world: World) -> float:
+    """NMI between agents' communities and their home towns, over agents in a community.
+    Near 1: communities just mirror geography. Lower: groups cut across towns."""
+    members = [a for a in world.agents.values() if world.metrics.community_of.get(a.id, -1) >= 0]
+    return normalized_mutual_information(
+        [world.metrics.community_of[a.id] for a in members], [a.home for a in members]
+    )
 
 
 def _count_components(world: World, social: nx.Graph) -> int:

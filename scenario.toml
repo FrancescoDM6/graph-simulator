@@ -240,6 +240,11 @@ mechanisms = { gifting = false }
 description = "No brokers at all. Note: this also shrinks the population by the merchants."
 mechanisms = { brokering = false }
 
+[variants.no_merchants_equal_population]
+description = "No brokers, and each merchant's place goes to a farmer or miner, so the population stays the same."
+mechanisms = { brokering = false }
+world = { towns = { Ashford = { founding = { farmer = 13 } }, Millbrook = { founding = { farmer = 10, miner = 4 } }, Stonehold = { founding = { miner = 6 } } } }
+
 [variants.no_introductions]
 description = "No triadic closure."
 mechanisms = { introductions = false }
@@ -280,8 +285,8 @@ seeds = "1-100"
 ticks = 2000
 level = "summary"
 variants = [
-  "baseline", "no_gifting", "no_merchants", "no_introductions", "no_organizations",
-  "no_droughts", "static_social", "random_partners",
+  "baseline", "no_gifting", "no_merchants", "no_merchants_equal_population", "no_introductions",
+  "no_organizations", "no_droughts", "static_social", "random_partners",
 ]
 sweep = {}
 
@@ -308,6 +313,13 @@ present_if = ">= 2.0"
 description = "The social graph keeps several communities."
 measure = "mean_communities"
 present_if = ">= 2.0"
+
+[phenomena.factions_beyond_geography]
+description = "Communities cut across towns instead of just mirroring them."
+# Alignment is 1.0 when every community is exactly one town's people (what happens without
+# merchants: 20/20 calibration worlds). Baseline worlds ranged 0.68-0.98 (median 0.885).
+measure = "mean_town_alignment"
+present_if = "<= 0.95"
 
 [phenomena.drought_shock]
 description = "Droughts cause starvation."
