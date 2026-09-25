@@ -178,6 +178,11 @@ class MetricsSpec:
     gini_jump: float
     broker_overtake_margin: float
     min_broker_betweenness: float
+    wealthy_ratio: float
+    poor_ratio: float
+    hub_ratio: float
+    status_hold: int
+    attribution_window: int
 
 
 SOCIAL_DYNAMICS = ("dynamic", "frozen_topology", "frozen")

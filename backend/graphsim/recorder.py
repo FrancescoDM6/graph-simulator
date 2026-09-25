@@ -52,6 +52,8 @@ class Recorder:
             ]
         if spec.community_history and world.metrics.detections != self.detections_seen:
             self._record_communities()
+        if spec.community_history:
+            self._record_orgs()
         self.detections_seen = world.metrics.detections
         if spec.snapshots:
             self._snapshot()
@@ -170,15 +172,45 @@ class Recorder:
     def _record_communities(self) -> None:
         world = self.world
         for cid in world.metrics.alive:
-            record = world.metrics.communities[cid]
-            members = json.dumps(sorted(record.members))
-            self.batch.community_ticks.append((world.tick, cid, len(record.members), members))
+            members = world.metrics.communities[cid].members
+            density, trust, trade = group_internals(world, members)
+            self.batch.community_ticks.append(
+                (world.tick, cid, len(members), json.dumps(sorted(members)), density, trust, trade)
+            )
+
+    def _record_orgs(self) -> None:
+        world = self.world
+        for org in world.orgs.values():
+            members = set(world.members_of(org.id))
+            density, trust, _ = group_internals(world, members)
+            self.batch.org_ticks.append(
+                (world.tick, org.id, org.name, len(members), json.dumps(sorted(members)),
+                 density, trust)
+            )  # fmt: skip
 
     def _snapshot(self) -> None:
         state = serialize.snapshot(self.world, [])
         del state["events"]  # events are stored (and queried) separately
         data = gzip.compress(json.dumps(state, separators=(",", ":")).encode(), compresslevel=6)
         self.batch.snapshots.append((self.world.tick, data))
+
+
+def group_internals(world: World, members: set[str]) -> tuple[float, float | None, float]:
+    """A group's internal social density, mean trust between members (None without ties), and
+    total strength of the trade ties between members."""
+    social = [
+        e for e in world.edges.values()
+        if e.layer == Layer.SOCIAL and e.a in members and e.b in members
+    ]  # fmt: skip
+    trade = sum(
+        e.strength
+        for e in world.edges.values()
+        if e.layer == Layer.TRADE and e.a in members and e.b in members
+    )
+    pairs = len(members) * (len(members) - 1) / 2
+    density = round(len(social) / pairs, 4) if pairs else 0.0
+    trust = round(sum(e.trust for e in social) / len(social), 4) if social else None
+    return density, trust, round(trade, 4)
 
 
 def _activity(world: World) -> dict[str, dict[str, int]]:

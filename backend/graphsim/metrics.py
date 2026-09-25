@@ -12,6 +12,7 @@ import networkx as nx
 
 from graphsim.communities import update_communities
 from graphsim.events import ids
+from graphsim.milestones import update_milestones
 from graphsim.model import Layer, World
 from graphsim.stats import NodeStats, TickMetrics
 
@@ -33,6 +34,7 @@ def record_tick(world: World) -> None:
         for agent_id in world.agents
     }
     _update_top_broker(world, betweenness, trade)
+    update_milestones(world)
 
     metrics = _tick_metrics(world, social, betweenness, community_count=len(state.alive))
     history = world.metrics.history

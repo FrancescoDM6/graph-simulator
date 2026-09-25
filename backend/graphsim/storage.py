@@ -78,7 +78,13 @@ create table if not exists communities (
 ) without rowid;
 create table if not exists community_ticks (
     run_id integer, tick integer, community_id integer, size integer, members text,
+    density real, trust real, trade real,  -- internal social density, mean trust, trade volume
     primary key (run_id, community_id, tick)
+) without rowid;
+create table if not exists org_ticks (      -- organizations over time (full-level runs)
+    run_id integer, tick integer, org_id text, name text, size integer, members text,
+    density real, trust real,
+    primary key (run_id, org_id, tick)
 ) without rowid;
 create table if not exists snapshots (
     run_id integer, tick integer, data blob,   -- gzipped JSON from serialize.snapshot
@@ -120,6 +126,7 @@ class Batch:
     trust_changes: list[tuple] = field(default_factory=list)
     flows: list[tuple] = field(default_factory=list)  # (tick, agent, asset, category, ...)
     community_ticks: list[tuple] = field(default_factory=list)
+    org_ticks: list[tuple] = field(default_factory=list)
     snapshots: list[tuple] = field(default_factory=list)  # (tick, gzipped JSON)
     communities: list[tuple] = field(default_factory=list)  # only in the final batch
     agent_totals: list[tuple] = field(default_factory=list)  # only in the final batch
@@ -141,8 +148,26 @@ def connect(path: Path | str) -> sqlite3.Connection:
         if conn.execute("pragma journal_mode").fetchone()[0] != "wal":
             conn.execute("pragma journal_mode = wal")  # readers aren't blocked by a writer
         conn.executescript(SCHEMA)
+        _add_missing_columns(conn)
         _prepared.add(path)
     return conn
+
+
+# Columns added after a table was first created: (table, column, type). Databases made by older
+# versions get them added (as empty) when opened, so old runs stay readable.
+ADDED_COLUMNS = [
+    ("community_ticks", "density", "real"),
+    ("community_ticks", "trust", "real"),
+    ("community_ticks", "trade", "real"),
+]
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, column, kind in ADDED_COLUMNS:
+        existing = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
+        if column not in existing:
+            with conn:
+                conn.execute(f"alter table {table} add column {column} {kind}")
 
 
 # --- writing ----------------------------------------------------------------------------------
@@ -179,6 +204,7 @@ def write_batch(conn: sqlite3.Connection, run_id: int, batch: Batch) -> None:
         insert("flows", batch.flows)
         insert("agent_totals", batch.agent_totals, replace=True)
         insert("community_ticks", batch.community_ticks)
+        insert("org_ticks", batch.org_ticks)
         insert("snapshots", batch.snapshots)
         insert("communities", batch.communities, replace=True)
         insert("run_measures", list(batch.measures.items()), replace=True)
@@ -205,7 +231,7 @@ def delete_run(conn: sqlite3.Connection, run_id: int) -> None:
     tables = [
         "tick_metrics", "agents", "agent_ticks", "events", "event_subjects", "event_causes",
         "trust_changes", "communities", "community_ticks", "snapshots", "run_measures",
-        "flows", "agent_totals",
+        "flows", "agent_totals", "org_ticks",
     ]  # fmt: skip
     with conn:
         for table in tables:
@@ -457,6 +483,25 @@ def all_measures(conn: sqlite3.Connection, run_ids: list[int]) -> dict[int, dict
         for row in rows:
             result[row["run_id"]][row["name"]] = row["value"]
     return result
+
+
+def community_history(conn: sqlite3.Connection, run_id: int, community_id: int) -> list[dict]:
+    """The community at every detection: size, members and internal stats (full-level runs)."""
+    rows = conn.execute(
+        """select tick, size, members, density, trust, trade from community_ticks
+           where run_id = ? and community_id = ? order by tick""",
+        (run_id, community_id),
+    )
+    return [{**dict(row), "members": json.loads(row["members"])} for row in rows]
+
+
+def org_history(conn: sqlite3.Connection, run_id: int, org_id: str) -> list[dict]:
+    rows = conn.execute(
+        """select tick, name, size, members, density, trust from org_ticks
+           where run_id = ? and org_id = ? order by tick""",
+        (run_id, org_id),
+    )
+    return [{**dict(row), "members": json.loads(row["members"])} for row in rows]
 
 
 def measures(conn: sqlite3.Connection, run_id: int) -> dict[str, float]:

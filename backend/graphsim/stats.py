@@ -53,3 +53,7 @@ class MetricsState:
     # The current top trade broker. Only replaced when someone clearly overtakes them.
     top_broker: str = ""
     last_inequality_event: int = -1_000_000  # tick, for spacing out "inequality rising" events
+    # Milestones (milestones.py). Dicts used as ordered sets / counters, keyed (agent, status).
+    statuses: dict[tuple[str, str], None] = field(default_factory=dict)
+    streaks: dict[tuple[str, str], int] = field(default_factory=dict)
+    recent_flows: list[list] = field(default_factory=list)  # the ledger, one list per tick

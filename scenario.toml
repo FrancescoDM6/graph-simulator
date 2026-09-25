@@ -200,6 +200,12 @@ gini_window = 50
 gini_jump = 0.08
 broker_overtake_margin = 1.1   # a new top broker must beat the old one by 10%
 min_broker_betweenness = 0.1   # below this nobody counts as the top broker
+# Milestones (milestones.py): a change in standing that lasts status_hold ticks.
+wealthy_ratio = 3.0            # "wealthy" = at least this many times the median coin
+poor_ratio = 0.33              # "poor" = at most this many times the median coin
+hub_ratio = 2.0                # "hub" = at least this many times the median number of ties
+status_hold = 20
+attribution_window = 100       # ticks of ledger summarized in a milestone's cause
 
 
 # =============================================================================================

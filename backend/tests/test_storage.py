@@ -104,3 +104,18 @@ def test_stored_flows_add_up_to_the_lifetime_totals(scenario):
     }
     assert summed.keys() == totals.keys()
     assert all(abs(summed[k] - totals[k]) < 1e-3 for k in totals)
+
+
+def test_community_and_org_histories_include_internal_stats(scenario):
+    run_id = runner.run(scenario, seed=1, ticks=400)
+    conn = storage.connect(scenario.database)
+    community = storage.communities(conn, run_id)[0]["community_id"]
+    history = storage.community_history(conn, run_id, community)
+    assert history and all(0 <= row["density"] <= 1 for row in history)
+    assert any(row["trust"] is not None for row in history)
+    org_ids = conn.execute(
+        "select distinct org_id from org_ticks where run_id = ?", (run_id,)
+    ).fetchall()
+    assert org_ids, "seed 1 founds an organization within 400 ticks"
+    org_rows = storage.org_history(conn, run_id, org_ids[0]["org_id"])
+    assert all(row["size"] == len(row["members"]) for row in org_rows)
