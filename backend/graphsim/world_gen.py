@@ -73,6 +73,9 @@ def create_agent(world: World, occupation: str, home: str) -> Agent:
         arrived=world.tick,
     )
     world.add_agent(agent)
+    world.record_flow(agent.id, "coin", agent.coin, "endowment")
+    for good, amount in agent.inventory.items():
+        world.record_flow(agent.id, good, amount, "endowment")
     world.add_edge(agent.id, home, Layer.ACCESS, cost=0.0)
     if cfg.occupations[occupation].reach == "home_and_neighbours":
         for road in world.edges_of(home, Layer.ACCESS):

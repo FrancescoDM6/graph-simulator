@@ -12,14 +12,18 @@ def consume(world: World) -> None:
     for agent in list(world.agents.values()):
         short_of = ""
         for good, spec in cfg.goods.items():
+            held = agent.inventory[good]
             agent.inventory[good] *= 1 - spec.spoil_rate
+            world.record_flow(agent.id, good, agent.inventory[good] - held, "spoiled")
             if spec.eaten_per_tick <= 0:
                 continue
-            if agent.inventory[good] >= spec.eaten_per_tick:
+            held = agent.inventory[good]
+            if held >= spec.eaten_per_tick:
                 agent.inventory[good] -= spec.eaten_per_tick
             else:
                 agent.inventory[good] = 0.0
                 short_of = short_of or good
+            world.record_flow(agent.id, good, agent.inventory[good] - held, "eaten")
         if not short_of:
             agent.hunger_ticks = 0
             continue
@@ -106,6 +110,9 @@ def drought_cause(world: World, good: str) -> tuple[int, ...]:
 
 
 def _leave(world: World, agent: Agent, cause: str, caused_by: tuple[int, ...]) -> None:
+    world.record_flow(agent.id, "coin", -agent.coin, "departure")
+    for good, held in agent.inventory.items():
+        world.record_flow(agent.id, good, -held, "departure")
     world.log.add(
         world.tick,
         "left",

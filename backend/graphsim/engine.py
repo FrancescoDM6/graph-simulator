@@ -12,6 +12,7 @@ def step(world: World) -> list[Event]:
     first_event = len(world.log)
     world.interactions.clear()
     world.trust_changes.clear()
+    world.flows.clear()
 
     # 1. Consume: eat, starve, leave, arrive
     needs.consume(world)

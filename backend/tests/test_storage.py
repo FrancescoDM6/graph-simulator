@@ -89,3 +89,18 @@ def test_changed_scenario_refuses_to_materialize_an_old_run(scenario):
     scenario.raw["trade"]["gift_amount"] = 3.0  # scenario.toml "edited" since the run
     with pytest.raises(ValueError, match="different settings"):
         runner.materialize(scenario, summary_id)
+
+
+def test_stored_flows_add_up_to_the_lifetime_totals(scenario):
+    run_id = runner.run(scenario, seed=1, ticks=TICKS)
+    conn = storage.connect(scenario.database)
+    agent = storage.agents(conn, run_id)[0]["agent_id"]
+    summed: dict[tuple[str, str], float] = {}
+    for flow in storage.flows(conn, run_id, agent):
+        key = (flow["asset"], flow["category"])
+        summed[key] = summed.get(key, 0.0) + flow["amount"]
+    totals = {
+        (t["asset"], t["category"]): t["amount"] for t in storage.agent_totals(conn, run_id, agent)
+    }
+    assert summed.keys() == totals.keys()
+    assert all(abs(summed[k] - totals[k]) < 1e-3 for k in totals)

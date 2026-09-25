@@ -88,6 +88,15 @@ create table if not exists run_measures (
     run_id integer, name text, value real,
     primary key (run_id, name)
 ) without rowid;
+create table if not exists flows (          -- the resource ledger (full-level runs)
+    run_id integer, tick integer, agent_id text, asset text, category text, amount real,
+    counterparty text, event_id integer
+);
+create index if not exists flows_by_agent on flows (run_id, agent_id, tick);
+create table if not exists agent_totals (   -- lifetime ledger totals, kept at every level
+    run_id integer, agent_id text, asset text, category text, amount real,
+    primary key (run_id, agent_id, asset, category)
+) without rowid;
 create table if not exists experiment_runs (   -- which run answered each job of an experiment
     experiment text, label text, seed integer, run_id integer,
     primary key (experiment, label, seed)
@@ -109,9 +118,11 @@ class Batch:
     event_subjects: list[tuple] = field(default_factory=list)  # (entity, event_id)
     event_causes: list[tuple] = field(default_factory=list)  # (event_id, cause_id)
     trust_changes: list[tuple] = field(default_factory=list)
+    flows: list[tuple] = field(default_factory=list)  # (tick, agent, asset, category, ...)
     community_ticks: list[tuple] = field(default_factory=list)
     snapshots: list[tuple] = field(default_factory=list)  # (tick, gzipped JSON)
     communities: list[tuple] = field(default_factory=list)  # only in the final batch
+    agent_totals: list[tuple] = field(default_factory=list)  # only in the final batch
     measures: dict[str, float] = field(default_factory=dict)  # only in the final batch
 
 
@@ -165,6 +176,8 @@ def write_batch(conn: sqlite3.Connection, run_id: int, batch: Batch) -> None:
         insert("event_subjects", batch.event_subjects)
         insert("event_causes", batch.event_causes)
         insert("trust_changes", batch.trust_changes)
+        insert("flows", batch.flows)
+        insert("agent_totals", batch.agent_totals, replace=True)
         insert("community_ticks", batch.community_ticks)
         insert("snapshots", batch.snapshots)
         insert("communities", batch.communities, replace=True)
@@ -192,6 +205,7 @@ def delete_run(conn: sqlite3.Connection, run_id: int) -> None:
     tables = [
         "tick_metrics", "agents", "agent_ticks", "events", "event_subjects", "event_causes",
         "trust_changes", "communities", "community_ticks", "snapshots", "run_measures",
+        "flows", "agent_totals",
     ]  # fmt: skip
     with conn:
         for table in tables:
@@ -357,6 +371,32 @@ def trust_changes(
     if other:
         changes = [c for c in changes if other in (c["a"], c["b"])]
     return changes
+
+
+def flows(
+    conn: sqlite3.Connection,
+    run_id: int,
+    agent: str,
+    first_tick: int = 0,
+    last_tick: int | None = None,
+) -> list[dict[str, Any]]:
+    """The agent's ledger entries (full-level runs), oldest first."""
+    last = last_tick if last_tick is not None else 1 << 62
+    rows = conn.execute(
+        """select tick, asset, category, amount, counterparty, event_id from flows
+           where run_id = ? and agent_id = ? and tick between ? and ? order by tick, rowid""",
+        (run_id, agent, first_tick, last),
+    )
+    return [dict(row) for row in rows]
+
+
+def agent_totals(conn: sqlite3.Connection, run_id: int, agent: str) -> list[dict[str, Any]]:
+    """The agent's lifetime ledger totals by asset and category (every recording level)."""
+    rows = conn.execute(
+        "select asset, category, amount from agent_totals where run_id = ? and agent_id = ?",
+        (run_id, agent),
+    )
+    return [dict(row) for row in rows]
 
 
 def communities(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:

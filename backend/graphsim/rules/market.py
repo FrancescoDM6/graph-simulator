@@ -40,8 +40,11 @@ def share_town_levy(world: World) -> None:
             levy = agent.coin * world.cfg.prices.town_levy
             agent.coin -= levy
             pot += levy
+            world.record_flow(agent.id, "coin", -levy, "levy_paid")
+        share = pot / len(residents)
         for agent in residents:
-            agent.coin += pot / len(residents)
+            agent.coin += share
+            world.record_flow(agent.id, "coin", share, "levy_received")
 
 
 def _log_big_moves(

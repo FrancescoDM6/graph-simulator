@@ -102,6 +102,40 @@ class Interaction:
     cause: str  # human-readable explanation
     broker: str | None = None  # broker who connected buyer and seller, if any
     event_id: int = -1  # the event logged for this attempt
+    price: float = 0.0  # per unit, as paid by the buyer (successful trades only)
+    commission: float = 0.0  # per unit, the broker's part of the price
+
+
+# Why an agent's holdings changed. Every change to coin or goods is exactly one of these.
+FLOW_CATEGORIES = (
+    "endowment",  # what an agent starts with (or brings when arriving)
+    "harvest",
+    "tool_use",
+    "eaten",
+    "spoiled",
+    "sale",
+    "purchase",
+    "commission",  # a broker's cut of a trade it connected
+    "gift_given",
+    "gift_received",
+    "levy_paid",
+    "levy_received",
+    "departure",  # holdings that leave the world with an agent
+)
+
+
+@dataclass
+class Flow:
+    """One entry in the resource ledger: `amount` of an asset entering (+) or leaving (-) an
+    agent's holdings, and why. The ledger is complete: an agent's flows in a tick add up to the
+    change in its holdings (tested in test_ledger.py)."""
+
+    agent: str
+    asset: str  # "coin" or a good
+    amount: float
+    category: str  # one of FLOW_CATEGORIES
+    counterparty: str = ""  # the other agent; for a commission, "buyer>seller"
+    event_id: int = -1  # the trade or gift event, if any
 
 
 @dataclass
@@ -139,6 +173,7 @@ class World:
 
     interactions: list[Interaction] = field(default_factory=list)  # this tick only
     trust_changes: list[TrustChange] = field(default_factory=list)  # this tick only
+    flows: list[Flow] = field(default_factory=list)  # this tick only (the resource ledger)
     metrics: MetricsState = field(default_factory=MetricsState)
 
     # node id -> keys of the edges touching it. A dict used as an insertion-ordered set.
@@ -213,6 +248,19 @@ class World:
 
     def neighbors(self, node_id: str, layer: Layer | None = None) -> list[str]:
         return [edge.other(node_id) for edge in self.edges_of(node_id, layer)]
+
+    def record_flow(
+        self,
+        agent: str,
+        asset: str,
+        amount: float,
+        category: str,
+        counterparty: str = "",
+        event_id: int = -1,
+    ) -> None:
+        """Adds a ledger entry (zero amounts are skipped)."""
+        if amount != 0:
+            self.flows.append(Flow(agent, asset, amount, category, counterparty, event_id))
 
     # --- common questions the rules ask ---
 

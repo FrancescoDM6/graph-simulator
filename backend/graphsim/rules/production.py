@@ -52,6 +52,7 @@ def harvest(world: World) -> None:
         taken = min(_output(world, agent), site.stock)
         site.stock -= taken
         agent.inventory[good] += taken
+        world.record_flow(agent.id, good, taken, "harvest")
 
 
 def _workplace(world: World, agent: Agent) -> Site | None:
@@ -73,5 +74,6 @@ def _output(world: World, agent: Agent) -> float:
         return occupation.output
     if agent.inventory[occupation.tool] >= occupation.tool_use:
         agent.inventory[occupation.tool] -= occupation.tool_use
+        world.record_flow(agent.id, occupation.tool, -occupation.tool_use, "tool_use")
         return occupation.output
     return occupation.output_without_tool

@@ -26,6 +26,9 @@ class Recorder:
         # depend on how often its metrics are stored.
         self.all_metrics: dict[str, list[tuple[int, float]]] = {}
         self.detections_seen = 0
+        # (agent, asset, category) -> lifetime total, from the resource ledger
+        self.flow_totals: dict[tuple[str, str, str], float] = {}
+        self._record_flows()  # the endowments recorded while the world was built
         self._note_arrivals()
         if spec.snapshots:
             self._snapshot()
@@ -42,6 +45,7 @@ class Recorder:
             self._record_metrics()
         if spec.agent_history_every and tick % spec.agent_history_every == 0:
             self._record_agents()
+        self._record_flows()
         if spec.trust_ledger:
             self.batch.trust_changes += [
                 (tick, c.a, c.b, c.before, c.after, c.event_id) for c in world.trust_changes
@@ -67,6 +71,10 @@ class Recorder:
         if world.tick % self.spec.metrics_every != 0:
             self._record_metrics()  # always store the final tick
         batch = self.flush()
+        batch.agent_totals = [
+            (agent, asset, category, round(total, 6))
+            for (agent, asset, category), total in self.flow_totals.items()
+        ]
         records = [
             analysis.community_row(record, world.tick)
             for record in world.metrics.communities.values()
@@ -117,6 +125,17 @@ class Recorder:
             )  # fmt: skip
             batch.event_subjects += [(entity, event.id) for entity in dict.fromkeys(event.subjects)]
             batch.event_causes += [(event.id, cause) for cause in dict.fromkeys(event.caused_by)]
+
+    def _record_flows(self) -> None:
+        tick = self.world.tick
+        for flow in self.world.flows:
+            key = (flow.agent, flow.asset, flow.category)
+            self.flow_totals[key] = self.flow_totals.get(key, 0.0) + flow.amount
+            if self.spec.flows:
+                self.batch.flows.append(
+                    (tick, flow.agent, flow.asset, flow.category, round(flow.amount, 6),
+                     flow.counterparty, flow.event_id)
+                )  # fmt: skip
 
     def _record_metrics(self) -> None:
         latest = self.world.metrics.history[-1]

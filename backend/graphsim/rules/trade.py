@@ -130,6 +130,7 @@ def _buy(world: World, buyer: Agent, good: str, amount: float) -> None:
     for offer in _pick_offers(world, buyer.id, offers, world.cfg.trade.max_attempts):
         interaction = _attempt_trade(world, buyer, offer, good, amount)
         _log_interaction(world, interaction, why, context)
+        _record_flows(world, interaction)
         world.interactions.append(interaction)
         if interaction.outcome in ("success", "gift"):
             return
@@ -206,7 +207,9 @@ def _attempt_trade(
         if offer.broker:
             world.agents[offer.broker].coin += quantity * commission
         cause = f"{buyer.name} bought {quantity:.1f} {good} from {seller.name}{via} at {price:.2f}"
-        return _interaction(buyer, offer, good, quantity, "success", cause)
+        interaction = _interaction(buyer, offer, good, quantity, "success", cause)
+        interaction.price, interaction.commission = price, commission
+        return interaction
 
     plea = _ask_for_help(world, buyer, offer, good)
     if plea is not None:
@@ -246,6 +249,23 @@ def _ask_for_help(world: World, buyer: Agent, offer: Offer, good: str) -> Intera
         "but kept it"
     )
     return _interaction(buyer, offer, good, 0.0, "refused", cause)
+
+
+def _record_flows(world: World, interaction: Interaction) -> None:
+    """Ledger entries for a trade or gift, using exactly the amounts _attempt_trade moved."""
+    i = interaction
+    record = world.record_flow
+    if i.outcome == "success":
+        record(i.buyer, i.good, i.amount, "purchase", i.seller, i.event_id)
+        record(i.buyer, "coin", -(i.amount * i.price), "purchase", i.seller, i.event_id)
+        record(i.seller, i.good, -i.amount, "sale", i.buyer, i.event_id)
+        record(i.seller, "coin", i.amount * (i.price - i.commission), "sale", i.buyer, i.event_id)
+        if i.broker:
+            pair = f"{i.buyer}>{i.seller}"
+            record(i.broker, "coin", i.amount * i.commission, "commission", pair, i.event_id)
+    elif i.outcome == "gift":
+        record(i.seller, i.good, -i.amount, "gift_given", i.buyer, i.event_id)
+        record(i.buyer, i.good, i.amount, "gift_received", i.seller, i.event_id)
 
 
 def _move_goods(seller: Agent, buyer: Agent, good: str, quantity: float) -> None:
