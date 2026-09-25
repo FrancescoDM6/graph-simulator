@@ -45,7 +45,7 @@ class Agent:
     ore: float
     coin: float
     hunger_ticks: int = 0
-    need: str = ""  # most pressing need this tick: "food", "ore", "stock" or ""
+    need: str = ""  # most pressing need this tick: "food", "ore" or ""
     arrived: int = 0  # tick the agent entered the world
 
 
@@ -53,6 +53,7 @@ class Agent:
 class Town:
     id: str
     name: str
+    founding_mix: dict[Occupation, int]  # how many of each occupation the town started with
 
 
 @dataclass
@@ -109,8 +110,9 @@ class Interaction:
     seller: str
     good: str  # "food" or "ore"
     amount: float
-    outcome: str  # "success", "no_surplus", "cannot_afford" or "gift"
+    outcome: str  # "success", "gift", "refused", "no_surplus" or "cannot_afford"
     cause: str  # human-readable explanation
+    broker: str | None = None  # merchant who brokered the deal, if any
 
 
 # --- World -----------------------------------------------------------------------------------
@@ -124,6 +126,9 @@ class World:
     log: EventLog = field(default_factory=EventLog)
     tick: int = 0
     drought: bool = False
+    prices: dict[str, float] = field(default_factory=dict)  # good -> current base price
+    # good -> price at the last "price rose/fell" event, so only big moves get logged
+    logged_prices: dict[str, float] = field(default_factory=dict)
 
     agents: dict[str, Agent] = field(default_factory=dict)
     towns: dict[str, Town] = field(default_factory=dict)
@@ -222,7 +227,12 @@ class World:
         return tie.trust if tie else None
 
     def agents_in_town(self, town_id: str) -> list[str]:
+        """Agents who live in the town."""
         return [a.id for a in self.agents.values() if a.home == town_id]
+
+    def agents_present_in(self, town_id: str) -> list[str]:
+        """Agents with access to the town: its residents plus merchants who visit it."""
+        return [n for n in self.neighbors(town_id, Layer.ACCESS) if n in self.agents]
 
     def towns_reachable_by(self, agent_id: str) -> list[str]:
         return [n for n in self.neighbors(agent_id, Layer.ACCESS) if n in self.towns]

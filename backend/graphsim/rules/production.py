@@ -10,9 +10,7 @@ def update_season(world: World) -> None:
     in_drought = world.tick >= cfg.drought_every and phase < cfg.drought_length
     if in_drought and not world.drought:
         world.drought = True
-        world.log.add(
-            world.tick, "drought_started", (), "A drought began", cause="the dry season"
-        )
+        world.log.add(world.tick, "drought_started", (), "A drought began", cause="the dry season")
     elif not in_drought and world.drought:
         world.drought = False
         world.log.add(world.tick, "drought_ended", (), "The drought ended", cause="rain returned")
@@ -32,8 +30,9 @@ def harvest(world: World) -> None:
     world.rng.shuffle(workers)
     for agent in workers:
         site = _workplace(world, agent)
-        if site is None:
-            continue
+        held = agent.food if agent.occupation == Occupation.FARMER else agent.ore
+        if site is None or held >= world.cfg.max_holding:
+            continue  # nowhere to work, or already holding more than they can sell
         wanted = _yield(world, agent)
         taken = min(wanted, site.stock)
         site.stock -= taken

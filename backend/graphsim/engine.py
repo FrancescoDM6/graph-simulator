@@ -3,7 +3,7 @@
 from graphsim import metrics
 from graphsim.events import Event
 from graphsim.model import World
-from graphsim.rules import groups, needs, production, relationships, trade
+from graphsim.rules import groups, market, needs, production, relationships, trade
 
 
 def step(world: World) -> list[Event]:
@@ -24,8 +24,10 @@ def step(world: World) -> list[Event]:
     # 3. Evaluate needs
     needs.evaluate_needs(world)
 
-    # 4. Trade (records interactions; doesn't change relationships yet)
+    # 4. Trade (records interactions; doesn't change relationships yet), then markets react
     trade.run_trading(world)
+    market.update_prices(world)
+    market.share_town_levy(world)
 
     # 5. Relationships
     relationships.apply_interactions(world)

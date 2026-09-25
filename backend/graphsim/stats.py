@@ -15,6 +15,8 @@ class TickMetrics:
     merchants: int
     total_food: float
     total_coin: float
+    price_food: float
+    price_ore: float
     gini_coin: float
     social_density: float
     social_components: int  # connected groups of at least cfg.min_component_size agents

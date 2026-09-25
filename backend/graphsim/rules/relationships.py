@@ -1,11 +1,10 @@
 """Tick phases 5, 7 and 8: how ties strengthen, weaken, form, and disappear.
 
-Trust changes only through trade (success, failure, gifts) and introductions.
+Trust changes only through trade (successes, gifts, refusals to help) and introductions.
 Strength is about contact: it grows with trades and time spent together, and decays otherwise.
 """
 
 from graphsim.model import Edge, Interaction, Layer, World
-
 
 # --- Phase 5: relationships -------------------------------------------------------------------
 
@@ -16,9 +15,9 @@ def apply_interactions(world: World) -> None:
             _on_trade_success(world, interaction)
         elif interaction.outcome == "gift":
             _on_gift(world, interaction)
-        elif interaction.outcome == "no_surplus":
-            _on_failed_trade(world, interaction)
-        # "cannot_afford" is nobody's fault: no trust change.
+        elif interaction.outcome == "refused":
+            _on_refusal(world, interaction)
+        # "no_surplus" and "cannot_afford" are nobody's fault: no trust change.
 
 
 def socialize(world: World) -> None:
@@ -98,9 +97,16 @@ def prune_faded_ties(world: World) -> None:
 
 
 def _on_trade_success(world: World, interaction: Interaction) -> None:
-    cfg = world.cfg
-    buyer, seller = interaction.buyer, interaction.seller
+    """A brokered deal ties buyer to broker and broker to seller; otherwise buyer to seller."""
+    if interaction.broker:
+        _record_trade(world, interaction.buyer, interaction.broker, interaction.cause)
+        _record_trade(world, interaction.broker, interaction.seller, interaction.cause)
+    else:
+        _record_trade(world, interaction.buyer, interaction.seller, interaction.cause)
 
+
+def _record_trade(world: World, buyer: str, seller: str, cause: str) -> None:
+    cfg = world.cfg
     trade_tie = world.get_edge(buyer, seller, Layer.TRADE)
     if trade_tie is None:
         trade_tie = world.add_edge(buyer, seller, Layer.TRADE, strength=0.0)
@@ -109,15 +115,32 @@ def _on_trade_success(world: World, interaction: Interaction) -> None:
             "trade_started",
             (buyer, seller),
             f"{world.name(buyer)} started trading with {world.name(seller)}",
-            cause=interaction.cause,
+            cause=cause,
         )
     trade_tie.strength = min(1.0, trade_tie.strength + cfg.trade_bump)
     trade_tie.last_active = world.tick
 
-    social_tie = _get_or_create_social_tie(world, buyer, seller)
-    social_tie.strength = min(1.0, social_tie.strength + cfg.social_bump)
-    social_tie.last_active = world.tick
-    _change_trust(world, social_tie, cfg.trust_gain * (1 - social_tie.trust), interaction.cause)
+    # Regular trading partners get to know each other, if both have room for another tie.
+    # Trust lives on the social tie.
+    social_tie = world.get_edge(buyer, seller, Layer.SOCIAL)
+    if (
+        social_tie is None
+        and trade_tie.strength >= cfg.trade_friendship_at
+        and _has_room_for_tie(world, buyer)
+        and _has_room_for_tie(world, seller)
+    ):
+        social_tie = _get_or_create_social_tie(world, buyer, seller)
+        world.log.add(
+            world.tick,
+            "met",
+            (buyer, seller),
+            f"{world.name(buyer)} got to know {world.name(seller)}",
+            cause="they became regular trading partners",
+        )
+    if social_tie is not None:
+        social_tie.strength = min(1.0, social_tie.strength + cfg.social_bump)
+        social_tie.last_active = world.tick
+        _change_trust(world, social_tie, cfg.trust_gain * (1 - social_tie.trust), cause)
 
 
 def _on_gift(world: World, interaction: Interaction) -> None:
@@ -136,7 +159,7 @@ def _on_gift(world: World, interaction: Interaction) -> None:
     _change_trust(world, tie, 2 * cfg.trust_gain * (1 - tie.trust), interaction.cause)
 
 
-def _on_failed_trade(world: World, interaction: Interaction) -> None:
+def _on_refusal(world: World, interaction: Interaction) -> None:
     tie = world.get_edge(interaction.buyer, interaction.seller, Layer.SOCIAL)
     if tie is not None:
         _change_trust(world, tie, -world.cfg.trust_loss, interaction.cause)
@@ -149,20 +172,27 @@ def _change_trust(world: World, tie: Edge, delta: float, cause: str) -> None:
     tie.trust = min(1.0, max(0.0, before + delta))
     a, b = world.name(tie.a), world.name(tie.b)
     if before < cfg.trusted_above <= tie.trust:
-        world.log.add(world.tick, "trusted", (tie.a, tie.b), f"{a} and {b} now trust each other",
-                      cause)
+        world.log.add(
+            world.tick, "trusted", (tie.a, tie.b), f"{a} and {b} now trust each other", cause
+        )
     elif before >= cfg.distrusted_below > tie.trust:
-        world.log.add(world.tick, "distrusted", (tie.a, tie.b),
-                      f"{a} and {b} lost trust in each other", cause)
+        world.log.add(
+            world.tick, "distrusted", (tie.a, tie.b), f"{a} and {b} lost trust in each other", cause
+        )
 
 
 def _get_or_create_social_tie(world: World, a: str, b: str) -> Edge:
     cfg = world.cfg
     tie = world.get_edge(a, b, Layer.SOCIAL)
     if tie is None:
-        tie = world.add_edge(a, b, Layer.SOCIAL, strength=cfg.meet_strength,
-                             trust=cfg.initial_trust)
+        tie = world.add_edge(
+            a, b, Layer.SOCIAL, strength=cfg.meet_strength, trust=cfg.initial_trust
+        )
     return tie
+
+
+def _has_room_for_tie(world: World, agent_id: str) -> bool:
+    return len(world.edges_of(agent_id, Layer.SOCIAL)) < world.cfg.max_social_ties
 
 
 def _fellow_members(world: World, a: str, b: str) -> bool:
@@ -174,14 +204,13 @@ def _meet_townsperson(world: World, agent_id: str) -> None:
     cfg = world.cfg
     home = world.agents[agent_id].home
     already_known = set(world.neighbors(agent_id, Layer.SOCIAL))
-    strangers = [
-        a for a in world.agents_in_town(home) if a != agent_id and a not in already_known
-    ]
+    strangers = [a for a in world.agents_in_town(home) if a != agent_id and a not in already_known]
     if not strangers:
         return
     other = world.rng.choice(strangers)
-    world.add_edge(agent_id, other, Layer.SOCIAL, strength=cfg.meet_strength,
-                   trust=cfg.initial_trust)
+    world.add_edge(
+        agent_id, other, Layer.SOCIAL, strength=cfg.meet_strength, trust=cfg.initial_trust
+    )
     world.log.add(
         world.tick,
         "met",

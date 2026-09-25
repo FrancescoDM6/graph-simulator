@@ -32,7 +32,9 @@ def record_tick(world: World) -> None:
     }
     _update_top_broker(world, betweenness, trade)
 
-    metrics = _tick_metrics(world, social, betweenness, community_count=len(world.metrics.communities))
+    metrics = _tick_metrics(
+        world, social, betweenness, community_count=len(world.metrics.communities)
+    )
     history = world.metrics.history
     if history:
         _detect_component_change(world, history[-1].social_components, metrics.social_components)
@@ -84,6 +86,8 @@ def _tick_metrics(
         merchants=sum(a.occupation == Occupation.MERCHANT for a in agents),
         total_food=round(sum(a.food for a in agents), 2),
         total_coin=round(sum(a.coin for a in agents), 2),
+        price_food=round(world.prices["food"], 3),
+        price_ore=round(world.prices["ore"], 3),
         gini_coin=round(gini([a.coin for a in agents]), 4),
         social_density=round(nx.density(social), 4),
         social_components=_count_components(world, social),
@@ -91,7 +95,7 @@ def _tick_metrics(
         communities=community_count,
         avg_trust=round(mean(e.trust for e in social_ties), 4) if social_ties else 0.0,
         trades=outcomes.count("success"),
-        failed_trades=outcomes.count("no_surplus") + outcomes.count("cannot_afford"),
+        failed_trades=len(outcomes) - outcomes.count("success") - outcomes.count("gift"),
         gifts=outcomes.count("gift"),
         starving=sum(a.hunger_ticks > 0 for a in agents),
         orgs=len(world.orgs),
@@ -258,5 +262,5 @@ def _detect_inequality_jump(world: World, gini_now: float) -> None:
         "inequality_rising",
         (richest.id,),
         f"Inequality rose sharply (Gini {gini_before:.2f} → {gini_now:.2f})",
-        cause=f"richest agent: {richest.name}, a {richest.occupation}, with {richest.coin:.0f} coin",
+        cause=f"richest: {richest.name}, a {richest.occupation}, with {richest.coin:.0f} coin",
     )

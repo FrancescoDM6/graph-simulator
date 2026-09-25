@@ -63,8 +63,6 @@ def print_summary(history: list[TickMetrics], event_counts: Counter) -> None:
         return
     first, last = history[0], history[-1]
     later_half = history[len(history) // 2 :]
-    drought = [m for m in history if m.drought]
-    normal = [m for m in history if not m.drought]
     merchant_population_share = mean(m.merchants / max(m.population, 1) for m in later_half)
 
     print("\nTarget phenomena")
@@ -78,13 +76,14 @@ def print_summary(history: list[TickMetrics], event_counts: Counter) -> None:
         f"; formed {event_counts['community_formed']}x, dissolved "
         f"{event_counts['community_dissolved']}x"
     )
-    if drought and normal:
+    before, after = _drought_edges(history)
+    if before:
         print(
-            f"  3. Drought:    avg trust {mean(m.avg_trust for m in normal):.2f} normal vs "
-            f"{mean(m.avg_trust for m in drought):.2f} drought; trades/tick "
-            f"{mean(m.trades for m in normal):.1f} vs {mean(m.trades for m in drought):.1f}; "
-            f"starving {mean(m.starving for m in normal):.1f} vs "
-            f"{mean(m.starving for m in drought):.1f}"
+            f"  3. Drought:    from the tick before each drought to its last tick: avg trust "
+            f"{mean(m.avg_trust for m in before):.2f} -> {mean(m.avg_trust for m in after):.2f}, "
+            f"starving {mean(m.starving for m in before):.1f} -> "
+            f"{mean(m.starving for m in after):.1f}, orgs {mean(m.orgs for m in before):.1f} -> "
+            f"{mean(m.orgs for m in after):.1f}"
         )
     print(f"  4. Inequality: Gini {first.gini_coin:.2f} -> {last.gini_coin:.2f}")
 
@@ -97,6 +96,17 @@ def print_summary(history: list[TickMetrics], event_counts: Counter) -> None:
     print("\nEvent counts")
     for kind, count in event_counts.most_common():
         print(f"  {kind:<20} {count}")
+
+
+def _drought_edges(history: list[TickMetrics]) -> tuple[list[TickMetrics], list[TickMetrics]]:
+    """Metrics from the tick before each drought starts, and from each drought's last tick."""
+    before, after = [], []
+    for previous, current in zip(history, history[1:], strict=False):
+        if current.drought and not previous.drought:
+            before.append(previous)
+        if previous.drought and not current.drought:
+            after.append(previous)
+    return before[: len(after)], after
 
 
 if __name__ == "__main__":
