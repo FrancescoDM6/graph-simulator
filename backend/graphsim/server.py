@@ -1,120 +1,256 @@
-"""Live server: runs one simulation and streams a snapshot to every viewer after each tick.
+"""The viewer's API: browse stored runs, start new ones, and dig into any tick.
 
 Run from backend/:   uv run uvicorn graphsim.server:app --port 8000
 
-WebSocket /ws
-    server -> viewer: a snapshot (see serialize.py) after every tick or control change
-    viewer -> server: {"command": "play" | "pause" | "step"}
-                      {"command": "set_speed", "ticks_per_second": 8}
-                      {"command": "reset", "seed": 42}
-REST
-    GET /api/entities/{id}/history   every event involving that node
-    GET /api/metrics?last=200        recent per-tick metrics
+Runs are computed in background threads and written to the run database as they go, so the
+viewer can start playing a run while it is still being computed. Everything the viewer shows
+comes from the database (see storage.py); nothing here simulates on its own.
 """
 
-import asyncio
-from contextlib import asynccontextmanager
-from typing import Any
+import sqlite3
+import threading
+from collections.abc import Iterator
+from dataclasses import asdict
+from typing import Annotated, Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel
 
-from graphsim import engine, serialize
-from graphsim.config import load_scenario
-from graphsim.events import Event
-from graphsim.world_gen import build_world
+from graphsim import report, runner, storage
+from graphsim.config import PARTNER_CHOICE, SOCIAL_DYNAMICS, ScenarioError, load_scenario
 
-MIN_SPEED, MAX_SPEED = 0.5, 30.0  # ticks per second
-IDLE_POLL_SECONDS = 0.05  # how often the loop checks for "play" while paused
-
-
-class Simulation:
-    """The one running world, plus the playback controls viewers share."""
-
-    def __init__(self, seed: int = 1) -> None:
-        self.running = False
-        self.ticks_per_second = 4.0
-        self.viewers: list[WebSocket] = []
-        self.reset(seed)
-
-    def reset(self, seed: int) -> None:
-        self.world = build_world(load_scenario().config(), seed)
-        self.last_events: list[Event] = []
-
-    def step(self) -> None:
-        self.last_events = engine.step(self.world)
-
-    def snapshot(self) -> dict[str, Any]:
-        message = serialize.snapshot(self.world, self.last_events)
-        message["running"] = self.running
-        message["ticks_per_second"] = self.ticks_per_second
-        return message
-
-    async def broadcast(self) -> None:
-        message = self.snapshot()
-        for viewer in list(self.viewers):
-            try:
-                await viewer.send_json(message)
-            except Exception:  # the viewer went away mid-send; forget it
-                self.viewers.remove(viewer)
-
-    async def handle(self, command: dict[str, Any]) -> None:
-        name = command.get("command")
-        if name == "play":
-            self.running = True
-        elif name == "pause":
-            self.running = False
-        elif name == "step":
-            self.running = False
-            self.step()
-        elif name == "set_speed":
-            speed = float(command.get("ticks_per_second", self.ticks_per_second))
-            self.ticks_per_second = min(MAX_SPEED, max(MIN_SPEED, speed))
-        elif name == "reset":
-            self.running = False
-            self.reset(int(command.get("seed", self.world.seed)))
-        await self.broadcast()
-
-    async def run_forever(self) -> None:
-        while True:
-            if self.running:
-                self.step()
-                await self.broadcast()
-                await asyncio.sleep(1 / self.ticks_per_second)
-            else:
-                await asyncio.sleep(IDLE_POLL_SECONDS)
+app = FastAPI(title="graphsim")
+DATABASE = load_scenario().database
 
 
-sim = Simulation()
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    loop_task = asyncio.create_task(sim.run_forever())
-    yield
-    loop_task.cancel()
-
-
-app = FastAPI(title="graphsim", lifespan=lifespan)
-
-
-@app.websocket("/ws")
-async def viewer_socket(websocket: WebSocket) -> None:
-    await websocket.accept()
-    sim.viewers.append(websocket)
-    await websocket.send_json(sim.snapshot())
+def db() -> Iterator[sqlite3.Connection]:
+    conn = storage.connect(DATABASE)
     try:
-        while True:
-            await sim.handle(await websocket.receive_json())
-    except WebSocketDisconnect:
-        if websocket in sim.viewers:
-            sim.viewers.remove(websocket)
+        yield conn
+    finally:
+        conn.close()
 
 
-@app.get("/api/entities/{entity_id}/history")
-def entity_history(entity_id: str) -> list[dict[str, Any]]:
-    return [serialize.event_dict(e) for e in sim.world.log.for_entity(entity_id)]
+Db = Annotated[sqlite3.Connection, Depends(db)]  # a database connection for one request
 
 
-@app.get("/api/metrics")
-def recent_metrics(last: int = 200) -> list[dict[str, Any]]:
-    return sim.world.metrics.history[-last:]
+# --- scenario ---------------------------------------------------------------------------------
+
+
+@app.get("/api/scenario")
+def scenario_info() -> dict[str, Any]:
+    """Everything the viewer needs to know about scenario.toml."""
+    scenario = load_scenario()
+    cfg = scenario.config()
+    return {
+        "name": scenario.name,
+        "seed": scenario.seed,
+        "ticks": scenario.ticks,
+        "goods": {name: asdict(spec) for name, spec in cfg.goods.items()},
+        "occupations": {name: asdict(spec) for name, spec in cfg.occupations.items()},
+        "mechanisms": asdict(cfg.mechanisms),
+        "mechanism_choices": {
+            "social_dynamics": SOCIAL_DYNAMICS,
+            "partner_choice": PARTNER_CHOICE,
+        },
+        "variants": {
+            name: variant.get("description", "") for name, variant in scenario.variants.items()
+        },
+        "experiments": {
+            name: {
+                "description": spec.description,
+                "seeds": len(spec.seeds),
+                "variants": spec.variants,
+                "ticks": spec.ticks,
+            }
+            for name, spec in scenario.experiments.items()
+        },
+        "phenomena": {name: asdict(spec) for name, spec in scenario.phenomena.items()},
+        "timeline": scenario.viewer.get("timeline", []),
+    }
+
+
+# --- runs -------------------------------------------------------------------------------------
+
+
+class NewRun(BaseModel):
+    seed: int
+    ticks: int
+    variant: str = "baseline"
+    overrides: dict[str, Any] = {}
+    label: str = ""
+
+
+@app.get("/api/runs")
+def list_runs(conn: Db, experiment: str | None = None) -> list[dict[str, Any]]:
+    return storage.list_runs(conn, experiment)
+
+
+@app.post("/api/runs")
+def start_run(conn: Db, request: NewRun) -> dict[str, Any]:
+    """Starts computing a full-detail run (or returns an identical stored one)."""
+    scenario = load_scenario()
+    try:
+        run_id, done = runner.prepare(
+            conn,
+            scenario,
+            seed=request.seed,
+            ticks=request.ticks,
+            variant=request.variant,
+            overrides=request.overrides,
+            level="full",
+            label=request.label,
+        )
+    except ScenarioError as error:
+        raise HTTPException(400, str(error)) from error
+    if not done:
+        _compute_in_background(run_id)
+    return storage.get_run(conn, run_id) or {}
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(conn: Db, run_id: int) -> dict[str, Any]:
+    return _require_run(conn, run_id)
+
+
+@app.post("/api/runs/{run_id}/materialize")
+def materialize(conn: Db, run_id: int) -> dict[str, Any]:
+    """A full-detail version of a summary run (e.g. from an experiment), computed if needed."""
+    info = _require_run(conn, run_id)
+    if info["level"] == "full":
+        return info
+    scenario = load_scenario()
+    try:
+        if scenario.config(info["variant"], info["overrides"]).config_hash() != info["config_hash"]:
+            raise HTTPException(409, "scenario.toml has changed since this run was made")
+        full_id, done = runner.prepare(
+            conn,
+            scenario,
+            seed=info["seed"],
+            ticks=info["ticks"],
+            variant=info["variant"],
+            overrides=info["overrides"],
+            level="full",
+            experiment=info["experiment"],
+            label=info["label"],
+        )
+    except ScenarioError as error:
+        raise HTTPException(400, str(error)) from error
+    if not done:
+        _compute_in_background(full_id)
+    return storage.get_run(conn, full_id) or {}
+
+
+# --- one run's data ---------------------------------------------------------------------------
+
+
+@app.get("/api/runs/{run_id}/metrics")
+def metrics(conn: Db, run_id: int, names: str = "") -> dict[str, Any]:
+    wanted = [n for n in names.split(",") if n] or None
+    return {
+        "names": storage.metric_names(conn, run_id),
+        "series": storage.metric_series(conn, run_id, wanted),
+    }
+
+
+@app.get("/api/runs/{run_id}/snapshots")
+def snapshots(conn: Db, run_id: int, first: int = 0, count: int = 1) -> list[dict]:
+    return storage.snapshots(conn, run_id, first, min(count, 200))
+
+
+@app.get("/api/runs/{run_id}/events")
+def events(
+    conn: Db,
+    run_id: int,
+    first: int = 0,
+    last: int | None = None,
+    entity: str | None = None,
+    detail: bool = False,
+    kinds: str = "",
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    kind_list = [k for k in kinds.split(",") if k] or None
+    return storage.events(conn, run_id, first, last, entity, detail, kind_list, min(limit, 5000))
+
+
+@app.get("/api/runs/{run_id}/events/{event_id}/trail")
+def trail(conn: Db, run_id: int, event_id: int, depth: int = 3) -> dict[str, Any]:
+    result = storage.causal_trail(conn, run_id, event_id, min(depth, 8))
+    if result is None:
+        raise HTTPException(404, f"run {run_id} has no event {event_id}")
+    return result
+
+
+@app.get("/api/runs/{run_id}/agents")
+def agents(conn: Db, run_id: int) -> list[dict[str, Any]]:
+    return storage.agents(conn, run_id)
+
+
+@app.get("/api/runs/{run_id}/agents/{agent_id}/history")
+def agent_history(conn: Db, run_id: int, agent_id: str) -> dict[str, Any]:
+    lifetime = next((a for a in storage.agents(conn, run_id) if a["agent_id"] == agent_id), None)
+    return {"lifetime": lifetime, "ticks": storage.agent_history(conn, run_id, agent_id)}
+
+
+@app.get("/api/runs/{run_id}/trust")
+def trust(
+    conn: Db,
+    run_id: int,
+    agent: str,
+    other: str | None = None,
+    first: int = 0,
+    last: int | None = None,
+) -> list[dict[str, Any]]:
+    """Trust-ledger entries for an agent's ties, each with the event that caused it."""
+    changes = storage.trust_changes(conn, run_id, agent, other, first, last)
+    return [{**c, "event": storage.event(conn, run_id, c["event_id"])} for c in changes]
+
+
+@app.get("/api/runs/{run_id}/communities")
+def communities(conn: Db, run_id: int) -> dict[str, Any]:
+    return {
+        "communities": storage.communities(conn, run_id),
+        "sizes": storage.community_sizes(conn, run_id),
+    }
+
+
+@app.get("/api/runs/{run_id}/communities/members")
+def community_members(conn: Db, run_id: int, tick: int) -> dict[int, list[str]]:
+    return storage.community_members(conn, run_id, tick)
+
+
+@app.get("/api/runs/{run_id}/measures")
+def measures(conn: Db, run_id: int) -> dict[str, float]:
+    return storage.measures(conn, run_id)
+
+
+# --- experiments ------------------------------------------------------------------------------
+
+
+@app.get("/api/experiments/{name}")
+def experiment(conn: Db, name: str) -> dict[str, Any]:
+    scenario = load_scenario()
+    if name not in scenario.experiments:
+        raise HTTPException(404, f"no experiment {name!r} in scenario.toml")
+    return report.build(conn, scenario, name)
+
+
+# --- helpers ----------------------------------------------------------------------------------
+
+
+def _require_run(conn, run_id: int) -> dict[str, Any]:
+    info = storage.get_run(conn, run_id)
+    if info is None:
+        raise HTTPException(404, f"no run {run_id}")
+    return info
+
+
+def _compute_in_background(run_id: int) -> None:
+    def work() -> None:
+        conn = storage.connect(DATABASE)
+        try:
+            runner.execute(conn, load_scenario(), run_id)
+        finally:
+            conn.close()
+
+    threading.Thread(target=work, name=f"run-{run_id}", daemon=True).start()

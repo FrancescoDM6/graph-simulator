@@ -1,33 +1,86 @@
+"""The viewer's API, against a throwaway run database."""
+
+import time
+
+import pytest
 from fastapi.testclient import TestClient
 
-from graphsim.server import app, sim
+from graphsim import runner, server
+from graphsim.config import load_scenario
 
 
-def test_viewer_gets_a_snapshot_and_can_step_and_reset():
-    with TestClient(app) as client, client.websocket_connect("/ws") as ws:
-        first = ws.receive_json()
-        assert first["running"] is False
-        assert any(n["kind"] == "agent" for n in first["nodes"])
-
-        ws.send_json({"command": "step"})
-        after_step = ws.receive_json()
-        assert after_step["tick"] == first["tick"] + 1
-        assert after_step["metrics"] is not None
-
-        ws.send_json({"command": "reset", "seed": 5})
-        after_reset = ws.receive_json()
-        assert after_reset["tick"] == 0
-        assert after_reset["seed"] == 5
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "DATABASE", tmp_path / "runs.db")
+    with TestClient(server.app) as client:
+        yield client
 
 
-def test_history_endpoint_returns_events_for_one_entity():
-    sim.reset(seed=2)
-    for _ in range(50):
-        sim.step()
-    agent_id = next(iter(sim.world.agents))
+def wait_until_done(client, run_id: int) -> dict:
+    for _ in range(300):
+        run = client.get(f"/api/runs/{run_id}").json()
+        if run["status"] != "running":
+            return run
+        time.sleep(0.05)
+    raise TimeoutError(run_id)
 
-    with TestClient(app) as client:
-        history = client.get(f"/api/entities/{agent_id}/history").json()
 
-    assert history, "an agent should have some history after 50 ticks"
-    assert all(agent_id in event["subjects"] for event in history)
+def test_scenario_describes_goods_occupations_variants_and_timeline(client):
+    info = client.get("/api/scenario").json()
+    assert {"food", "ore"} <= info["goods"].keys()
+    assert info["occupations"]["merchant"]["brokers"] is True
+    assert "no_gifting" in info["variants"]
+    assert info["timeline"][0]["metric"]
+
+
+def test_start_a_run_then_read_everything_about_it(client):
+    started = client.post("/api/runs", json={"seed": 1, "ticks": 60}).json()
+    run = wait_until_done(client, started["id"])
+    assert run["status"] == "done" and run["ticks_done"] == 60
+    run_id = run["id"]
+
+    series = client.get(f"/api/runs/{run_id}/metrics", params={"names": "gini_coin"}).json()
+    assert len(series["series"]["gini_coin"]) == 60
+    assert "population.farmer" in series["names"]
+
+    snaps = client.get(f"/api/runs/{run_id}/snapshots", params={"first": 10, "count": 3}).json()
+    assert [s["tick"] for s in snaps] == [10, 11, 12]
+
+    notable = client.get(f"/api/runs/{run_id}/events").json()
+    assert notable and not any(e["detail"] for e in notable)
+    trusted = client.get(f"/api/runs/{run_id}/events", params={"kinds": "trusted"}).json()
+    trail = client.get(f"/api/runs/{run_id}/events/{trusted[0]['id']}/trail").json()
+    assert trail["causes"][0]["kind"] in ("trade", "gift")
+
+    agent_id = snaps[0]["nodes"][0]["id"]
+    history = client.get(f"/api/runs/{run_id}/agents/{agent_id}/history").json()
+    assert history["lifetime"]["agent_id"] == agent_id and history["ticks"]
+    ledger = client.get(f"/api/runs/{run_id}/trust", params={"agent": agent_id}).json()
+    assert all(entry["event"]["id"] == entry["event_id"] for entry in ledger)
+
+    lineage = client.get(f"/api/runs/{run_id}/communities").json()
+    assert lineage["communities"]
+    members = client.get(f"/api/runs/{run_id}/communities/members", params={"tick": 30}).json()
+    assert members
+
+    # Asking for the same run again returns the stored one.
+    assert client.post("/api/runs", json={"seed": 1, "ticks": 60}).json()["id"] == run_id
+
+
+def test_a_bad_variant_is_a_clear_error(client):
+    response = client.post("/api/runs", json={"seed": 1, "ticks": 10, "variant": "nope"})
+    assert response.status_code == 400 and "unknown variant" in response.json()["detail"]
+
+
+def test_summary_runs_can_be_opened_at_full_detail(client, tmp_path):
+    scenario = load_scenario()
+    scenario.database = tmp_path / "runs.db"
+    summary_id = runner.run(scenario, seed=2, ticks=40, level="summary")
+    full = client.post(f"/api/runs/{summary_id}/materialize").json()
+    full = wait_until_done(client, full["id"])
+    assert full["level"] == "full" and full["seed"] == 2
+    assert client.get(f"/api/runs/{full['id']}/snapshots").json()
+
+
+def test_unknown_experiment_is_404(client):
+    assert client.get("/api/experiments/nope").status_code == 404
