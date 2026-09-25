@@ -1,164 +1,168 @@
-# Simulation Spec (Phase 0)
+# Simulation Spec
 
-The graph *is* the world. There is no map, grid, or hidden state beyond the node and edge
-attributes listed here. Every tunable number named below lives in `backend/graphsim/config.py`.
-The founding population of each town is in `backend/graphsim/world_gen.py` (`TOWNS`).
+The graph *is* the world: agents, towns, work sites and organizations are nodes, and friendship,
+trade, membership and access are edge layers. There is no map, grid or hidden state beyond the
+node and edge attributes listed here.
 
-## Node types
+**Every factor lives in [`scenario.toml`](../scenario.toml)**: the goods, sites and occupations
+of the economy, the towns and roads, every parameter, mechanism switches, variants, experiments,
+phenomenon thresholds, recording levels and the viewer's timeline. Names in `code` below are keys
+in that file.
 
-| Kind  | Count at start | State |
-|-------|----------------|-------|
-| Agent | 33 (see `TOWNS`) | `occupation`, `home` town, `food`, `ore`, `coin`, `hunger_ticks`, `need` |
-| Town  | 3 | name, founding mix of occupations |
-| Site  | 4 (2 farms, 2 mines) | `site_kind`, `stock`, `capacity`, `regen` |
-| Org   | 0 at start; founded by agents | name, `home` town, `founded` tick |
+## The economy (data-driven)
 
-### Occupations and interdependence
+- **Goods** (`[goods.*]`): anything with `eaten_per_tick > 0` must be eaten every tick, or the
+  agent goes hungry. Goods spoil at `spoil_rate`. Agents keep a `reserve` of every good they eat
+  or use as a tool, buy up to `buy_target` when below it, and sell only what is above it.
+- **Site kinds** (`[site_kinds.*]`) produce one good, regenerate `regen` per tick up to
+  `capacity`, and may be `drought_sensitive`.
+- **Occupations** (`[occupations.*]`):
+  - they work at a site kind next to their home town, producing `output` per tick;
+  - they may use up `tool_use` of a `tool` good per harvest, and produce only
+    `output_without_tool` without it;
+  - they can `reach` their home town, or also its neighbours;
+  - they may be `brokers`.
 
-- **Farmers** harvest food at a farm next to their town. Each harvest uses `ore_per_harvest` ore
-  (tools). Without ore they still farm, but only at `farm_yield_no_tools`.
-- **Miners** harvest ore at a mine next to their town. They need food like everyone else.
-- **Merchants** produce nothing and hold no stock. They **broker** deals between buyers and
-  producers who can't meet directly, taking `merchant_markup` of the price as commission.
-  Merchants can reach their home town and its neighbours, so they are the only link between
-  Ashford and Stonehold.
+The default scenario:
+- farmers grow food and use ore as tools;
+- miners dig ore;
+- merchants broker deals between towns;
+- three towns lie in a line, Ashford – Millbrook – Stonehold. Ashford has no mine and
+  Stonehold has no farm.
 
-Everyone eats `food_per_tick` each tick. Food spoils at `food_spoil_rate`. Producers stop
-harvesting once they hold `max_holding` of their good.
-
-### Geography
-
-```
- Ashford ──road── Millbrook ──road── Stonehold
-    │              │     │               │
- North Farm   South Farm  Copper Mine   Iron Mine
- 12 farmers    9 farmers, 3 miners      5 miners
- 1 merchant    2 merchants              1 merchant
-```
-
-Ashford has no mine and Stonehold has no farm. Ashford's farmers get tools, and Stonehold's
-miners get food, through merchants, friends, or organisations.
+A new good, site kind or occupation needs no code, only entries in the file (tested in
+`test_config.py`).
 
 ## Edge layers
 
-Every edge is keyed by `(a, b, layer)` with `a < b`. So two nodes can be connected on several
-layers at once, making the graph *multiplex* from day one.
+Every edge is keyed by `(a, b, layer)`, so two nodes can be connected on several layers at once.
 
-| Layer        | Connects        | Meaningful fields | Lifecycle |
-|--------------|-----------------|-------------------|-----------|
-| `social`     | agent–agent     | `strength` (0–1), `trust` (0–1) | Formed by meeting, introduction, or regular trading. Decays unless used. |
-| `trade`      | agent–agent     | `strength` = recent trade volume (0–1) | Formed by a successful trade (brokered trades link buyer–broker and broker–seller). Decays quickly. |
-| `membership` | agent–org       | `created` tick | Join/leave rules below. |
-| `access`     | agent/site–town, town–town | `cost` | Agents reach their home town; merchants also reach neighbouring towns. |
+| Layer | Connects | Fields | Lifecycle |
+|---|---|---|---|
+| `social` | agent–agent | strength, trust | Formed by meeting, introduction or regular trading; decays unless used. |
+| `trade` | agent–agent | strength = recent volume | Formed by a successful trade (brokered: buyer–broker and broker–seller); decays fast. |
+| `membership` | agent–org | created | Join, leave, found, dissolve. |
+| `access` | agent/site–town, town–town | cost | Home town; brokers also reach neighbouring towns. |
 
-## Who can trade with whom
+## Tick order (`engine.step`, top to bottom)
 
-An agent can **meet**:
-1. anyone with access to a town the agent has access to (residents plus visiting merchants),
-2. its `social` and `trade` neighbours (in any town),
-3. fellow members of its org.
+1. **Consume.** Goods spoil, then agents eat. After `leave_after_hungry` hungry ticks an agent
+   leaves. Newcomers (`arrival_chance`) fill the job each town is most short of, compared with
+   its `founding` mix.
+2. **Produce.** Droughts start every `drought_every` ticks and last `drought_length`. Sites
+   regenerate, and workers harvest in shuffled order.
+3. **Evaluate needs.**
+4. **Trade.** In shuffled order, buyers try up to `max_attempts` offers from producers they can
+   meet, directly or through a broker they can meet.
+   - **Choosing an offer.** Offers are weighted by trust and habit (`partner_choice` can replace
+     this with random choice).
+   - **Price.** Base price × (1 − `trust_discount` × trust), plus the broker's commission.
+   - **Asking for help.** A starving buyer who can't trade asks an acquaintance who could spare
+     food. A close friend gives it (a **gift**); anyone else **refuses**.
+   - **Markets.** Prices then move with shortages and failed payments, and towns redistribute
+     `town_levy` of residents' coin.
+5. **Relationships.**
+   - Trades strengthen ties, and regular partners become friends.
+   - Gifts and trades raise trust; refusals lower it.
+   - Each agent spends time with one friend.
+   - Idle ties decay (except between fellow org members). The attention limit caps social ties
+     at `max_social_ties`.
+6. **Organizations.** Agents join, leave, found and dissolve orgs based on trust.
+7. **New ties.** Chance meetings, and introductions to friends of friends (triadic closure),
+   happen only between agents with room for another tie.
+8. **Prune.** Faded ties disappear.
+9. **Metrics.** Network measures are computed, community identities updated, and structural
+   events detected.
 
-A buyer's **offers** are the producers it can meet directly, plus producers that a merchant it
-can meet can meet (brokered).
+One seeded random generator drives everything, and iteration never goes over sets. The same seed
+and settings give the same history, which is tested across Python processes.
 
-## Tick order
+## Mechanism switches (`[mechanisms]`)
 
-This order is exactly what `engine.step()` runs, top to bottom.
+- `gifting`: with it off, starving agents don't ask for help, so there are no gifts and no
+  refusals.
+- `brokering`: off also removes broker occupations.
+- `meetings`, `introductions`, `trade_friendships`, `organizations`, `droughts`,
+  `price_adjustment`, `town_levy`, `attention_limit`.
+- `social_dynamics`:
+  - `dynamic`;
+  - `frozen_topology`: no social tie added or removed after tick 0;
+  - `frozen`: ties, strength and trust are all fixed.
+- `partner_choice`:
+  - `network`;
+  - `random_reachable`: uniform among reachable partners;
+  - `random_global`: any producer anywhere, with no brokers.
 
-1. **Consume.** Agents eat; food spoils. An agent who can't eat gains a hunger tick. After
-   `leave_after_hungry` hungry ticks it **leaves** (node and edges removed). With
-   `arrival_chance` per tick, a **newcomer** fills the job its town is most short of,
-   compared with the founding mix.
-2. **Produce.** A drought lasting `drought_length` ticks starts every `drought_every` ticks,
-   and farm regeneration drops to `drought_regen_factor`. Sites regenerate. Workers harvest
-   in shuffled order until the site's stock runs out.
-3. **Evaluate needs.** Each agent needs `food` below `food_reserve`; farmers also need `ore`
-   below `ore_reserve`.
-4. **Trade.** In seeded shuffled order, each agent with a need tries up to
-   `max_trade_attempts` offers. Offers are picked with weight = trust in the contact (or
-   `stranger_weight`), plus trade-tie strength (habit). Brokered offers are weighted by
-   `brokered_weight`.
-   - **Price** = base price × (1 − `trust_discount` × trust), plus the broker's commission.
-   - If a *hungry* buyer can't trade with someone it knows who could spare food, it asks for
-     help. A close friend (tie strength ≥ `gift_min_strength`) gives food; anyone else
-     **refuses**.
-   - Outcomes are recorded as *interactions*.
-   - Then the **market** reacts. Each good's base price rises when buyers find nothing to
-     spare, and falls when they can't pay (by up to `price_adjust_rate` per tick). Each town
-     also takes `town_levy` of every resident's coin and splits it equally among residents,
-     which keeps money circulating.
-5. **Relationships.** Interactions are applied:
-   - A successful trade strengthens trade ties. Once a trade tie is strong
-     (`trade_friendship_at`), the partners also form a social tie, if both have room.
-   - Successes and gifts raise trust; refusals lower it.
-   - Each agent spends time with one friend (weighted by strength), which bumps that tie.
-   - Idle ties decay, except social ties between fellow org members.
-   - An agent with more than `max_social_ties` drops its weakest tie (attention limit).
-6. **Groups.**
-   - Members leave when their average trust in fellow members falls below `leave_below_trust`.
-   - Non-members join the org whose members they trust most, if that total reaches `join_score`.
-   - An agent with at least `found_min_friends` trusted, unaffiliated friends may **found** an
-     org with them.
-   - An org with fewer than 2 members **dissolves**.
-7. **New ties.** Agents randomly meet people in their town (`meet_chance`). They are also
-   introduced to a close friend's close friends (`intro_chance`, triadic closure).
-8. **Prune.** Social and trade ties weaker than `prune_below` disappear.
-9. **Metrics.** Network metrics are recorded and structural events detected (see below).
+Each switch is tested to actually change behaviour (`test_mechanisms.py`). Ready-made ablations
+are in `[variants.*]`.
 
-The world owns one `random.Random(seed)`. All iteration happens over insertion-ordered dicts or
-sorted lists, never over sets, so the same seed always produces the same history.
+## Events and causal trails
 
-## Events and causes
+Every event has an id, `tick`, `kind`, `subjects`, a human-readable `message` and `cause`, and
+`caused_by`: the ids of the earlier events that led to it. Some examples:
 
-Every event has `tick`, `kind`, `subjects` (entity ids), `message` and `cause`. The cause says
-*why* in plain words, e.g. `"Rhea was starving; Bob had 9 food but kept it"`. Routine
-successful trades are counted in the metrics rather than logged; the log keeps the changes that
-explain history:
+- `trusted` → the trade or gift that pushed trust over `trusted_above`;
+- a gift → the recipient's `starving` event and the drought;
+- `starving` → the agent's own failed purchases this hungry spell, and the drought;
+- `left` → `starving`, and `arrived` → the departure that opened the job;
+- org, community, network and price events → the tie changes or trade attempts behind them.
 
-- trade ties starting and ending
-- trust crossing into *trusted* or *distrusted*
-- meetings, introductions, and ties dropped or faded
-- gifts, starving, leaving, arriving
-- org founded, joined, left, dissolved
-- price rose or fell; drought started or ended
-- structural events (below)
+Every trade attempt is logged as a **detail event**, so trails are complete. Every change to
+trust is recorded in a **trust ledger** together with the event that caused it.
 
-## Metrics and structural events
+> These are *recorded contributing causes*: what the rules knew about when they acted. They are
+> a trail to follow, not proof. Whether a cause really matters is what ablations answer.
 
-Recorded every tick:
-- population by occupation
-- food and coin totals, and prices
-- Gini coefficient of coin
-- social density, components and clustering
-- Louvain community count
-- average trust
-- trades, failures and gifts
-- starving count and org count
-- the top trade broker (trade-layer betweenness)
-- the merchants' share of trade betweenness
+## Communities with identity
 
-Community labels are matched tick-to-tick by overlap (Jaccard), so colours stay stable.
+Louvain runs every `community_every` ticks. New communities are matched to living ones by member
+overlap:
 
-Structural events are logged when:
-- the social graph splits or merges (the count of components with at least
-  `min_component_size` agents changes),
-- a community of at least `min_community_size` forms or dissolves,
-- the Gini coefficient rises by more than `gini_jump` within `gini_window` ticks,
-- a new agent clearly overtakes the top trade broker.
+- **Continuation**: Jaccard ≥ `community_match_jaccard` keeps the old id.
+- **Split**: a new group mostly drawn from one community becomes its child.
+- **Merger**: an old group whose members mostly went to one new community dies, merged into it.
+- **Birth** and **dissolution** cover everything else.
 
-## Target phenomena
+Each community keeps a record: born, died, fate, parent, merged-into, peak size, members ever and
+turnover. Communities shorter-lived than `community_min_lifespan` count as detection flicker.
 
-These are what tuning aimed for. `python -m graphsim.cli` reports all four.
+## Recording and runs
 
-1. **Brokers.** Merchants hold a disproportionate share of trade-layer betweenness. *Observed
-   (seeds 1–3):* 50–85% of betweenness from about 10% of the population. One merchant usually
-   becomes dominant, because buyers return to regular partners.
-2. **Factions.** The social graph forms communities that split and merge over time.
-   *Observed:* 2–4 communities, with a few formation/dissolution events per 100 ticks.
-3. **Drought shock.** *Hypothesis was:* trust collapses during droughts. *Observed instead:*
-   - starvation rises about 6× and departures about 4×,
-   - new trade ties double as the network reroutes,
-   - gifts between close friends rise about 100×, so average trust goes *up*.
+Every run is stored in the run database (`[run] database`, SQLite) and never overwritten.
 
-   Droughts produce mutual aid, not distrust. Refusals, which lower trust, stay rare.
-4. **Inequality.** The Gini coefficient of coin rises from 0 to roughly 0.5–0.7.
+- **`full` recording** (for the viewer) keeps per-tick snapshots and agent histories, detail
+  events, the trust ledger and community membership. That's about 19 KB per tick.
+- **`summary` recording** (for batch experiments) keeps metrics every 5 ticks, notable events,
+  agent lifetimes and community records.
+
+Identical runs are identified by config hash, seed, length and code version, and reused rather
+than recomputed. Any summary run can be recomputed at full detail, and it is the same world.
+
+## Measures and phenomena
+
+`backend/graphsim/analysis.py` defines one number per run for each question: brokerage ratio,
+community lifespan and turnover, drought ratios, Gini, trust, and so on. These are computed from
+every tick while the run is computed, and can be recomputed later from storage with
+`--reanalyze`. `[phenomena.*]` in the scenario turns a measure into a present/absent verdict.
+
+## What the 100-seed ablation study found
+
+`python -m graphsim.experiment ablations`: seeds 1–100 × 8 variants × 2000 ticks (800 runs,
+about 19 minutes on 22 cores). "Paired" means compared with the baseline run of the same seed.
+
+| Phenomenon (measure) | Baseline | What removes or changes it |
+|---|---|---|
+| **Brokerage** (broker share ÷ broker population share ≥ 2) | 100/100 worlds, median 7.7× | **Gone** without merchants (0/100) or with random partners (0/100). **Weakened** without droughts (77/100; lower in 96% of seeds). **Stronger** with a static social graph or without orgs (higher in 75–79% of seeds). |
+| **Inequality** (final Gini ≥ 0.4) | 100/100, median 0.60 | **Gone** without merchants (3/100): merchants are the inequality engine. Random partners reduce it (84/100; lower in 97% of seeds). |
+| **Drought shock** (starvation ratio ≥ 2) | 100/100, median 4.7× | Gone without droughts, as it should be. **Also gone without merchants** (0/100). Over the first 30 seeds, starvation averages 1.65 outside droughts and 1.40 inside them, compared with 1.15 and 6.06 at baseline. Two readings are possible: brokered trade spreads a local drought into widespread hunger, or the people brokers keep fed in normal times are the ones who starve in droughts. `no_merchants` also shrinks the population, so a follow-up variant that keeps the population equal is needed to tell these apart. |
+| **Drought solidarity** (gifts in droughts ≥ 3×) | 100/100, median 13× | Requires droughts and gifting (by construction), and also merchants (0/100 without). A static social graph weakens it (lower in 94% of seeds). |
+| **Factions** (mean communities ≥ 2) | 100/100 | 100/100 in every variant. **This measure doesn't discriminate**: communities largely mirror the three towns. A better factions measure is future work. |
+
+Other results:
+
+- **Droughts build the social structure.** Communities formed mid-run live a median of 78 ticks
+  at baseline, but only about 6 without droughts (mostly flicker). Average trust is 0.89 at
+  baseline, 0.66 without gifting and 0.59 without droughts. Trust is high *because* hard times
+  produce gifts.
+- **Null result: introductions (triadic closure)** make no measurable difference to any
+  phenomenon at this scale.

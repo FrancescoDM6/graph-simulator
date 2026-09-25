@@ -1,18 +1,23 @@
 # graph-simulator
 
 A simulation whose world *is* an evolving graph. Agents, towns, work sites and organizations
-are nodes. Friendship, trade, membership and access are edge layers. Nothing exists outside
-the graph: agents change relationships, relationships change behaviour, and structure emerges.
+are nodes; friendship, trade, membership and access are edge layers. Agents change
+relationships, relationships change behaviour, and structure emerges.
 
-The model is described in [docs/spec.md](docs/spec.md): node and edge types, the tick order,
-and which emergent phenomena it produces.
+It is built for investigation:
+- every factor lives in one file;
+- every run is stored and replayable;
+- mechanisms can be switched off one at a time and compared across many seeds;
+- every event records what led to it.
 
-## Running it
+The model and the findings so far are in [docs/spec.md](docs/spec.md).
+
+## Quick start
 
 You need [uv](https://docs.astral.sh/uv/) and Node 20+.
 
 ```bash
-# terminal 1: the simulation server (http://localhost:8000)
+# terminal 1: the API (http://localhost:8000)
 cd backend
 uv run uvicorn graphsim.server:app --port 8000
 
@@ -22,68 +27,107 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and press **Play**.
+Open http://localhost:5173 and press **New run…**.
 
-- Click a node to see its state, its relationships by layer, and its full history with causes.
-- Toggle layers in the top bar.
-- Tick **network-level only** in the event feed to see just structural events: communities
-  forming, the network splitting, a new top broker, price moves.
+## The one file: `scenario.toml`
 
-### Headless runs
+Everything the simulation uses is in [`scenario.toml`](scenario.toml), with a comment on every
+value:
+
+- **Economy.** Goods, site kinds and occupations. Add a good, a kind of site or an occupation
+  here and the rules use it; no code changes.
+- **World.** Towns, their sites and founding populations, and roads.
+- **Behaviour.** Every parameter, grouped by topic.
+- **`[mechanisms]`.** Switch whole behaviours on and off.
+- **`[variants.*]`.** Named overrides (e.g. `no_gifting`), deep-merged over everything above.
+- **`[experiments.*]`.** Seeds × variants, with optional parameter sweeps.
+- **`[phenomena.*]`.** When a run counts as showing a phenomenon.
+- **`[recording.*]`** and **`[viewer]`.** What gets stored, and what the timeline shows.
+
+Loading is strict: a typo'd or missing key is an error naming its place.
+
+## Experiments
 
 ```bash
 cd backend
-uv run python -m graphsim.cli --seed 1 --ticks 5000
+uv run python -m graphsim.experiment ablations               # 100 seeds × 8 variants
+uv run python -m graphsim.experiment ablations --seeds 1-10  # a quick look
+uv run python -m graphsim.experiment ablations --report      # print the report again
+uv run python -m graphsim.experiment ablations --reanalyze   # after editing analysis.py
 ```
 
-This writes `runs/seed1/events.jsonl` and `runs/seed1/metrics.csv`, and prints a summary of
-the four target phenomena. Use it to check a config change before looking at the UI.
+Runs execute in parallel, and identical runs are reused, so an interrupted experiment resumes.
 
-### Tests and checks
+The report shows, for each phenomenon and variant:
+- how many worlds show it, with a 95% interval;
+- the distribution of its measure;
+- the change from the baseline **for the same seed**.
+
+The same data is written to `runs/experiments/<name>/*.csv` and shown in the viewer's
+**Experiments** tab, where clicking a dot opens that exact world.
+
+One run from the command line:
 
 ```bash
-cd backend && uv run pytest && uv run ruff check . && uv run ruff format --check .
-cd frontend && npm run typecheck
+uv run python -m graphsim.cli --seed 4 --variant no_gifting --set trade.gift_amount=3
+```
+
+## The viewer
+
+- **Explore.**
+  - **Run bar.** Pick a stored run, compare it with a second one side by side, or start a new
+    run with any seed, variant and mechanism switches. The dialog starts from the current run's
+    seed, so "same world, one change" is two clicks.
+  - **Playback.** Play, step or scrub. Runs can be watched while they are still computing.
+  - **Timeline.** The key metrics over the whole run, with drought bands. Click or drag to move
+    both graphs to that tick; the compared run is drawn dashed.
+  - **Inspector.** Click a node to see its state, charts of its whole life, its relationships
+    and its history. Click its trust chart to list the trust changes behind a jump.
+  - **Why?** Opens the causal trail of any event: the events that led to it, and so on
+    backwards.
+  - **Communities.** Every community's lifespan, with splits and mergers. Click one to
+    highlight its members.
+- **Experiments.** Results of each experiment, as described above.
+
+## Working with the data
+
+All runs live in `runs/graphsim.db` (SQLite). The schema is at the top of
+[`backend/graphsim/storage.py`](backend/graphsim/storage.py). For example:
+
+```python
+import sqlite3, pandas as pd
+db = sqlite3.connect("runs/graphsim.db")
+pd.read_sql("select * from tick_metrics where run_id = 1", db)
+pd.read_sql("select * from agent_ticks where run_id = 1 and agent_id = 'agent-004'", db)
 ```
 
 ## Layout
 
 ```
-docs/spec.md                  the model, in prose
+scenario.toml                  every factor
+docs/spec.md                   the model, in prose, and what experiments found
 backend/graphsim/
-  config.py                   every tunable number, one commented field each
-  model.py                    World, nodes, multiplex edges keyed by (a, b, layer)
-  world_gen.py                geography and founding population (TOWNS)
-  engine.py                   step(): the tick order, readable top to bottom
-  rules/                      one module per phase: needs, production, trade, market,
-                              relationships, groups
-  metrics.py                  NetworkX measurements + structural events (read-only)
-  events.py                   the event log; every event carries a cause
-  serialize.py / server.py    JSON snapshots over a WebSocket
-  cli.py                      headless runs and the phenomena summary
-frontend/src/
-  types.ts                    mirror of serialize.py (change both together)
-  api.ts                      WebSocket hook + history fetch
-  GraphView.tsx               Cytoscape + incremental fcose layout
-  graphStyle.ts               every visual encoding (size, colour, shape)
-  Controls / MetricsBar / Inspector / EventFeed / Legend
+  config.py                    the scenario file's schema and strict loader
+  model.py  world_gen.py       the world (multiplex edges keyed by (a, b, layer))
+  engine.py                    step(): the tick order, readable top to bottom
+  rules/                       needs, production, trade, market, relationships, groups
+  events.py                    the event log with causal links
+  communities.py               community identity over time
+  metrics.py                   network measurements and structural events
+  recorder.py  storage.py      what gets stored, and the run database
+  runner.py                    compute (or reuse) a run
+  analysis.py  report.py       run-level measures; experiment statistics
+  experiment.py  cli.py        command-line entry points
+  server.py                    the viewer's API
+frontend/src/                  React + Cytoscape viewer (charts are plain SVG)
 ```
 
-## Tuning
+## Tests and checks
 
-1. Change a number in `backend/graphsim/config.py`.
-2. Run the CLI for a few seeds.
-3. Compare the phenomena summary.
+```bash
+cd backend && uv run pytest && uv run ruff check . && uv run ruff format --check .
+cd frontend && npm run typecheck && npm run build
+```
 
-The model is balanced as a whole, so change one thing at a time. Useful levers:
-
-| Want | Try |
-|------|-----|
-| Harsher droughts | lower `drought_regen_factor`, raise `drought_length` |
-| Stronger brokers / more inequality | raise `merchant_markup`, lower `town_levy` |
-| Denser or sparser social graph | `max_social_ties`, `meet_chance`, `social_decay` |
-| More organizations | lower `found_min_trust` / `join_score` |
-
-Determinism: the same seed always gives the same history. This is enforced by a test that
-runs two processes with different hash seeds. When adding code, iterate over dicts or sorted
-lists, never over sets.
+The tests cover determinism across processes, each mechanism switch, causal links, community
+lineage, storage round-trips, the experiment runner, the report statistics and the API.
