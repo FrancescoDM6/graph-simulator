@@ -28,6 +28,30 @@ class RunData:
     min_lifespan: int  # communities shorter-lived than this count as detection flicker
 
 
+def ledger_summary(flows: list[dict]) -> dict:
+    """Ledger entries (as stored) summed by asset and category, plus the counterparties that
+    account for the most coin, e.g. to show where an agent's wealth came from."""
+    by_category: dict[str, dict[str, float]] = {}
+    by_counterparty: dict[tuple[str, str], float] = {}
+    for flow in flows:
+        per_asset = by_category.setdefault(flow["asset"], {})
+        per_asset[flow["category"]] = per_asset.get(flow["category"], 0.0) + flow["amount"]
+        if flow["asset"] == "coin" and flow["counterparty"]:
+            key = (flow["counterparty"], flow["category"])
+            by_counterparty[key] = by_counterparty.get(key, 0.0) + flow["amount"]
+    top = sorted(by_counterparty.items(), key=lambda kv: -abs(kv[1]))[:12]
+    return {
+        "by_category": {
+            asset: {c: round(v, 4) for c, v in categories.items()}
+            for asset, categories in by_category.items()
+        },
+        "counterparties": [
+            {"counterparty": who, "category": category, "coin": round(amount, 4)}
+            for (who, category), amount in top
+        ],
+    }
+
+
 def compute_measures(run: RunData) -> dict[str, float]:
     return {name: round(float(measure(run)), 6) for name, measure in MEASURES.items()}
 

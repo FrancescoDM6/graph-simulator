@@ -84,3 +84,33 @@ def test_summary_runs_can_be_opened_at_full_detail(client, tmp_path):
 
 def test_unknown_experiment_is_404(client):
     assert client.get("/api/experiments/nope").status_code == 404
+
+
+def test_ledger_community_and_org_pages(client):
+    started = client.post("/api/runs", json={"seed": 1, "ticks": 300}).json()
+    run_id = wait_until_done(client, started["id"])["id"]
+
+    broker = next(
+        n["id"]
+        for n in client.get(f"/api/runs/{run_id}/snapshots", params={"first": 300}).json()[0][
+            "nodes"
+        ]
+        if n["kind"] == "agent" and n["occupation"] == "merchant"
+    )
+    ledger = client.get(f"/api/runs/{run_id}/agents/{broker}/flows").json()
+    assert ledger["flows"] and ledger["lifetime"]
+    assert ledger["by_category"]["coin"]["commission"] > 0
+
+    lineage = client.get(f"/api/runs/{run_id}/communities").json()["communities"]
+    cid = lineage[0]["community_id"]
+    page = client.get(f"/api/runs/{run_id}/communities/{cid}").json()
+    assert page["record"]["community_id"] == cid and page["history"]
+    assert all(f"community-{cid}" in e["subjects"] for e in page["events"])
+    members = client.get(f"/api/runs/{run_id}/communities/members", params={"tick": 100})
+    assert members.status_code == 200
+
+    founded = client.get(f"/api/runs/{run_id}/events", params={"kinds": "founded_org"}).json()
+    if founded:  # seed 1 founds an organization early on
+        org_id = founded[0]["subjects"][1]
+        org = client.get(f"/api/runs/{run_id}/orgs/{org_id}").json()
+        assert org["history"] and org["events"]

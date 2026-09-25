@@ -16,7 +16,8 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from graphsim import report, runner, storage
+from graphsim import analysis, report, runner, storage
+from graphsim.communities import entity_id
 from graphsim.config import PARTNER_CHOICE, SOCIAL_DYNAMICS, ScenarioError, load_scenario
 
 app = FastAPI(title="graphsim")
@@ -206,11 +207,54 @@ def trust(
     return [{**c, "event": storage.event(conn, run_id, c["event_id"])} for c in changes]
 
 
+@app.get("/api/runs/{run_id}/agents/{agent_id}/flows")
+def agent_flows(
+    conn: Db, run_id: int, agent_id: str, first: int = 0, last: int | None = None
+) -> dict[str, Any]:
+    """Where the agent's coin and goods came from and went, between two ticks: every ledger
+    entry (full-level runs), a summary by category and counterparty, and lifetime totals."""
+    entries = storage.flows(conn, run_id, agent_id, first, last)
+    return {
+        "flows": entries,
+        **analysis.ledger_summary(entries),
+        "lifetime": storage.agent_totals(conn, run_id, agent_id),
+    }
+
+
 @app.get("/api/runs/{run_id}/communities")
 def communities(conn: Db, run_id: int) -> dict[str, Any]:
     return {
         "communities": storage.communities(conn, run_id),
         "sizes": storage.community_sizes(conn, run_id),
+    }
+
+
+@app.get("/api/runs/{run_id}/communities/{community_id:int}")
+def community(conn: Db, run_id: int, community_id: int) -> dict[str, Any]:
+    """One community's life: its record, its size and internal ties at every detection, who
+    joined and left between detections, and its events."""
+    record = next(
+        (c for c in storage.communities(conn, run_id) if c["community_id"] == community_id), None
+    )
+    if record is None:
+        raise HTTPException(404, f"run {run_id} has no community {community_id}")
+    history = storage.community_history(conn, run_id, community_id)
+    return {
+        "record": record,
+        "history": [{k: v for k, v in row.items() if k != "members"} for row in history],
+        "changes": _membership_changes(history),
+        "events": storage.events(conn, run_id, entity=entity_id(community_id), limit=2000),
+    }
+
+
+@app.get("/api/runs/{run_id}/orgs/{org_id}")
+def organization(conn: Db, run_id: int, org_id: str) -> dict[str, Any]:
+    history = storage.org_history(conn, run_id, org_id)
+    return {
+        "name": history[0]["name"] if history else org_id,
+        "history": [{k: v for k, v in row.items() if k != "members"} for row in history],
+        "changes": _membership_changes(history),
+        "events": storage.events(conn, run_id, entity=org_id, limit=2000),
     }
 
 
@@ -236,6 +280,17 @@ def experiment(conn: Db, name: str) -> dict[str, Any]:
 
 
 # --- helpers ----------------------------------------------------------------------------------
+
+
+def _membership_changes(history: list[dict]) -> list[dict[str, Any]]:
+    """Who joined and who left between consecutive records of a group."""
+    changes = []
+    for before, after in zip(history, history[1:], strict=False):
+        joined = sorted(set(after["members"]) - set(before["members"]))
+        left = sorted(set(before["members"]) - set(after["members"]))
+        if joined or left:
+            changes.append({"tick": after["tick"], "joined": joined, "left": left})
+    return changes
 
 
 def _require_run(conn, run_id: int) -> dict[str, Any]:

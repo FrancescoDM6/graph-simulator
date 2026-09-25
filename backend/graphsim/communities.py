@@ -110,6 +110,11 @@ def track_communities(world: World, found: list[set[str]], social: nx.Graph) -> 
     return {agent_id: cid for i, cid in id_of.items() for agent_id in found[i]}
 
 
+def entity_id(community_id: int) -> str:
+    """How a community appears among an event's subjects, e.g. "community-3"."""
+    return f"community-{community_id}"
+
+
 def louvain(social: nx.Graph) -> list[set[str]]:
     # Louvain iterates over sets internally. Sets of strings iterate in an order that changes
     # between Python processes (hash randomization), so run it on integer node labels instead.
@@ -173,7 +178,7 @@ def _log_formed(world: World, record: CommunityRecord, members: set[str], social
     world.log.add(
         world.tick,
         "community_formed",
-        tuple(sorted(members)),
+        (entity_id(record.id), *sorted(members)),
         f"Community {record.id} formed around {', '.join(world.name(h) for h in hubs)}",
         cause=f"{len(members)} agents became more tied to each other than to outsiders",
         caused_by=_tie_changes_among(world, members),
@@ -187,7 +192,7 @@ def _log_split(
     world.log.add(
         world.tick,
         "community_split",
-        tuple(sorted(members)),
+        (entity_id(record.id), entity_id(parent.id), *sorted(members)),
         f"Community {record.id} split off from community {parent.id}",
         cause=f"{from_parent} of its {len(members)} members came from community {parent.id}",
         caused_by=_tie_changes_among(world, members),
@@ -199,7 +204,7 @@ def _log_merged(world: World, record: CommunityRecord, destination_id: int) -> N
     world.log.add(
         world.tick,
         "community_merged",
-        tuple(still_here),
+        (entity_id(record.id), entity_id(destination_id), *still_here),
         f"Community {record.id} merged into community {destination_id}",
         cause=f"most of its {len(record.members)} members are now in community {destination_id}",
         caused_by=_tie_changes_among(world, record.members),
@@ -212,7 +217,7 @@ def _log_dissolved(world: World, record: CommunityRecord) -> None:
     world.log.add(
         world.tick,
         "community_dissolved",
-        tuple(still_here),
+        (entity_id(record.id), *still_here),
         f"Community {record.id} broke apart",
         cause=f"{len(members) - len(still_here)} of its {len(members)} members left the world; "
         "the rest's ties weakened or scattered across other groups",

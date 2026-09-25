@@ -67,6 +67,7 @@ def _nodes(world: World) -> list[dict[str, Any]]:
                 "community": stats.community if stats else -1,
                 "betweenness": round(stats.betweenness, 4) if stats else 0.0,
                 "degree": stats.degree if stats else 0,
+                "mean_trust": _mean_trust(world, agent.id),
             }
         )
     for town in world.towns.values():
@@ -101,3 +102,8 @@ def _nodes(world: World) -> list[dict[str, Any]]:
             }
         )
     return nodes
+
+
+def _mean_trust(world: World, agent_id: str) -> float | None:
+    ties = world.edges_of(agent_id, Layer.SOCIAL)
+    return round(sum(t.trust for t in ties) / len(ties), 4) if ties else None
