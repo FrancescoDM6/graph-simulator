@@ -1,5 +1,6 @@
 """Tick phases 1 and 3: eating, starving, leaving, arriving, and deciding what each agent needs."""
 
+from graphsim.events import FAILED_PURCHASE_KINDS, ids
 from graphsim.model import Agent, World
 from graphsim.world_gen import create_agent
 
@@ -25,15 +26,20 @@ def consume(world: World) -> None:
 
         agent.hunger_ticks += 1
         if agent.hunger_ticks == cfg.population.starving_notice_after:
+            # Why: the purchases that failed during this hungry spell, and any drought.
+            episode_start = world.tick - agent.hunger_ticks
+            failures = world.log.recent(agent.id, FAILED_PURCHASE_KINDS, since_tick=episode_start)
             world.log.add(
                 world.tick,
                 "starving",
                 (agent.id,),
                 f"{agent.name} is starving",
                 cause=f"no {short_of} for {agent.hunger_ticks} ticks",
+                caused_by=ids(failures) + drought_cause(world, short_of),
             )
         if agent.hunger_ticks >= cfg.population.leave_after_hungry:
-            _leave(world, agent, cause=f"starved for {agent.hunger_ticks} ticks")
+            starving = world.log.latest(agent.id, ("starving",))
+            _leave(world, agent, f"starved for {agent.hunger_ticks} ticks", ids([starving]))
 
 
 def maybe_add_newcomer(world: World) -> None:
@@ -45,12 +51,14 @@ def maybe_add_newcomer(world: World) -> None:
         return
     town_id, occupation, shortfall = opening
     agent = create_agent(world, occupation, town_id)
+    last_departure = world.log.latest(town_id, ("left",))
     world.log.add(
         world.tick,
         "arrived",
         (agent.id, town_id),
         f"{agent.name} arrived in {world.name(town_id)} as a {occupation}",
         cause=f"{world.name(town_id)} was short of {shortfall} {occupation}(s)",
+        caused_by=ids([last_departure]),
     )
 
 
@@ -72,13 +80,32 @@ def current_wants(world: World, agent: Agent) -> list[tuple[str, float]]:
     return wants
 
 
-def _leave(world: World, agent: Agent, cause: str) -> None:
+def starving_cause(world: World, agent: Agent) -> tuple[int, ...]:
+    """The agent's current "starving" event, if it is in the middle of a hungry spell."""
+    if agent.hunger_ticks < world.cfg.population.starving_notice_after:
+        return ()
+    since = world.tick - agent.hunger_ticks
+    return ids([world.log.latest(agent.id, ("starving",), since_tick=since)])
+
+
+def drought_cause(world: World, good: str) -> tuple[int, ...]:
+    """The current drought, if it affects the supply of this good."""
+    if world.drought_event is None:
+        return ()
+    affected = any(
+        kind.produces == good and kind.drought_sensitive for kind in world.cfg.site_kinds.values()
+    )
+    return (world.drought_event,) if affected else ()
+
+
+def _leave(world: World, agent: Agent, cause: str, caused_by: tuple[int, ...]) -> None:
     world.log.add(
         world.tick,
         "left",
         (agent.id, agent.home),
         f"{agent.name} left {world.name(agent.home)}",
         cause=cause,
+        caused_by=caused_by,
     )
     world.remove_node(agent.id)
 

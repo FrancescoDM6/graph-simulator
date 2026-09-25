@@ -11,6 +11,7 @@ def step(world: World) -> list[Event]:
     world.tick += 1
     first_event = len(world.log)
     world.interactions.clear()
+    world.trust_changes.clear()
 
     # 1. Consume: eat, starve, leave, arrive
     needs.consume(world)

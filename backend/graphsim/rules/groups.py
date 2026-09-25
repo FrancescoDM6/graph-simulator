@@ -5,6 +5,7 @@ Being in an org keeps social ties with fellow members from decaying and lets mem
 with each other across towns.
 """
 
+from graphsim.events import ids
 from graphsim.model import Agent, Layer, Org, World, edge_key
 
 
@@ -39,6 +40,7 @@ def _maybe_leave(world: World, agent: Agent, org_id: str) -> None:
         (agent.id, org_id),
         f"{agent.name} left {world.name(org_id)}",
         cause=cause,
+        caused_by=_events_with(world, agent.id, ("distrusted", "refused"), fellows),
     )
 
 
@@ -66,6 +68,7 @@ def _maybe_join(world: World, agent: Agent) -> bool:
         (agent.id, best_org),
         f"{agent.name} joined {world.name(best_org)}",
         cause=f"trusts members such as {friend_names} (total trust {best_score:.2f})",
+        caused_by=_events_with(world, agent.id, ("trusted",), best_friends),
     )
     return True
 
@@ -97,6 +100,7 @@ def _maybe_found(world: World, agent: Agent) -> None:
         (agent.id, org.id),
         f"{agent.name} founded {org.name}",
         cause=f"{agent.name} had {len(friends)} trusted friends outside any organization",
+        caused_by=_events_with(world, agent.id, ("trusted",), friends),
     )
     for friend in friends:
         world.add_edge(friend, org.id, Layer.MEMBERSHIP)
@@ -120,5 +124,15 @@ def _dissolve_small_orgs(world: World) -> None:
             (org.id, *members),
             f"{org.name} dissolved",
             cause=f"only {len(members)} member(s) left",
+            caused_by=ids(world.log.recent(org.id, ("left_org",), limit=3)),
         )
         world.remove_node(org.id)
+
+
+def _events_with(
+    world: World, agent_id: str, kinds: tuple[str, ...], others: list[str], limit: int = 3
+) -> tuple[int, ...]:
+    """Ids of the agent's most recent events of these kinds that also involve one of `others`."""
+    others_set = set(others)
+    found = [e for e in world.log.recent(agent_id, kinds, limit=50) if others_set & set(e.subjects)]
+    return ids(found[:limit])

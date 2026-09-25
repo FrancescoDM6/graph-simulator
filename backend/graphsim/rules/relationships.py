@@ -9,7 +9,7 @@ Strength is about contact: it grows with trades and time spent together, and dec
 The trade layer always stays dynamic.
 """
 
-from graphsim.model import Edge, Interaction, Layer, World
+from graphsim.model import Edge, Interaction, Layer, TrustChange, World
 
 # --- Phase 5: relationships -------------------------------------------------------------------
 
@@ -124,13 +124,13 @@ def prune_faded_ties(world: World) -> None:
 def _on_trade_success(world: World, interaction: Interaction) -> None:
     """A brokered deal ties buyer to broker and broker to seller; otherwise buyer to seller."""
     if interaction.broker:
-        _record_trade(world, interaction.buyer, interaction.broker, interaction.cause)
-        _record_trade(world, interaction.broker, interaction.seller, interaction.cause)
+        _record_trade(world, interaction.buyer, interaction.broker, interaction)
+        _record_trade(world, interaction.broker, interaction.seller, interaction)
     else:
-        _record_trade(world, interaction.buyer, interaction.seller, interaction.cause)
+        _record_trade(world, interaction.buyer, interaction.seller, interaction)
 
 
-def _record_trade(world: World, buyer: str, seller: str, cause: str) -> None:
+def _record_trade(world: World, buyer: str, seller: str, interaction: Interaction) -> None:
     rel = world.cfg.relationships
     trade_tie = world.get_edge(buyer, seller, Layer.TRADE)
     if trade_tie is None:
@@ -140,7 +140,8 @@ def _record_trade(world: World, buyer: str, seller: str, cause: str) -> None:
             "trade_started",
             (buyer, seller),
             f"{world.name(buyer)} started trading with {world.name(seller)}",
-            cause=cause,
+            cause=interaction.cause,
+            caused_by=(interaction.event_id,),
         )
     trade_tie.strength = min(1.0, trade_tie.strength + rel.trade_bump)
     trade_tie.last_active = world.tick
@@ -163,50 +164,47 @@ def _record_trade(world: World, buyer: str, seller: str, cause: str) -> None:
             (buyer, seller),
             f"{world.name(buyer)} got to know {world.name(seller)}",
             cause="they became regular trading partners",
+            caused_by=(interaction.event_id,),
         )
     if social_tie is not None and not _social_ties_frozen(world):
         social_tie.strength = min(1.0, social_tie.strength + rel.social_bump)
         social_tie.last_active = world.tick
-        _change_trust(world, social_tie, rel.trust_gain * (1 - social_tie.trust), cause)
+        _change_trust(world, social_tie, rel.trust_gain * (1 - social_tie.trust), interaction)
 
 
 def _on_gift(world: World, interaction: Interaction) -> None:
+    """The gift itself was logged by trade.py; here the friendship grows from it."""
     rel = world.cfg.relationships
-    world.log.add(
-        world.tick,
-        "gift",
-        (interaction.seller, interaction.buyer),
-        f"{world.name(interaction.seller)} gave {interaction.amount:.1f} {interaction.good} "
-        f"to {world.name(interaction.buyer)}",
-        cause=interaction.cause,
-    )
     tie = world.get_edge(interaction.buyer, interaction.seller, Layer.SOCIAL)
     if tie is not None and not _social_ties_frozen(world):  # gifts only happen between friends
         tie.strength = min(1.0, tie.strength + rel.social_bump)
         tie.last_active = world.tick
-        _change_trust(world, tie, 2 * rel.trust_gain * (1 - tie.trust), interaction.cause)
+        _change_trust(world, tie, 2 * rel.trust_gain * (1 - tie.trust), interaction)
 
 
 def _on_refusal(world: World, interaction: Interaction) -> None:
     tie = world.get_edge(interaction.buyer, interaction.seller, Layer.SOCIAL)
     if tie is not None and not _social_ties_frozen(world):
-        _change_trust(world, tie, -world.cfg.relationships.trust_loss, interaction.cause)
+        _change_trust(world, tie, -world.cfg.relationships.trust_loss, interaction)
 
 
-def _change_trust(world: World, tie: Edge, delta: float, cause: str) -> None:
-    """Changes trust and logs an event when it crosses into 'trusted' or 'distrusted'."""
+def _change_trust(world: World, tie: Edge, delta: float, interaction: Interaction) -> None:
+    """Changes trust, records it in the trust ledger, and logs an event when trust crosses
+    into 'trusted' or 'distrusted'."""
     rel = world.cfg.relationships
     before = tie.trust
     tie.trust = min(1.0, max(0.0, before + delta))
+    world.trust_changes.append(
+        TrustChange(tie.a, tie.b, before, tie.trust, event_id=interaction.event_id)
+    )
     a, b = world.name(tie.a), world.name(tie.b)
+    because = (interaction.event_id,)
     if before < rel.trusted_above <= tie.trust:
-        world.log.add(
-            world.tick, "trusted", (tie.a, tie.b), f"{a} and {b} now trust each other", cause
-        )
+        message = f"{a} and {b} now trust each other"
+        world.log.add(world.tick, "trusted", (tie.a, tie.b), message, interaction.cause, because)
     elif before >= rel.distrusted_below > tie.trust:
-        world.log.add(
-            world.tick, "distrusted", (tie.a, tie.b), f"{a} and {b} lost trust in each other", cause
-        )
+        message = f"{a} and {b} lost trust in each other"
+        world.log.add(world.tick, "distrusted", (tie.a, tie.b), message, interaction.cause, because)
 
 
 def _create_social_tie(world: World, a: str, b: str, trust: float) -> Edge:

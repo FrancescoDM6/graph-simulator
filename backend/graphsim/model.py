@@ -100,7 +100,19 @@ class Interaction:
     amount: float
     outcome: str  # "success", "gift", "refused", "no_surplus" or "cannot_afford"
     cause: str  # human-readable explanation
-    broker: str | None = None  # merchant who brokered the deal, if any
+    broker: str | None = None  # broker who connected buyer and seller, if any
+    event_id: int = -1  # the event logged for this attempt
+
+
+@dataclass
+class TrustChange:
+    """One entry in the trust ledger: every change to a tie's trust, and the event behind it."""
+
+    a: str
+    b: str
+    before: float
+    after: float
+    event_id: int  # the interaction (trade, gift, refusal) that changed it
 
 
 # --- World -----------------------------------------------------------------------------------
@@ -114,6 +126,7 @@ class World:
     log: EventLog = field(default_factory=EventLog)
     tick: int = 0
     drought: bool = False
+    drought_event: int | None = None  # id of the current drought's "drought_started" event
     prices: dict[str, float] = field(default_factory=dict)  # good -> current base price
     # good -> price at the last "price rose/fell" event, so only big moves get logged
     logged_prices: dict[str, float] = field(default_factory=dict)
@@ -125,6 +138,7 @@ class World:
     edges: dict[EdgeKey, Edge] = field(default_factory=dict)
 
     interactions: list[Interaction] = field(default_factory=list)  # this tick only
+    trust_changes: list[TrustChange] = field(default_factory=list)  # this tick only
     metrics: MetricsState = field(default_factory=MetricsState)
 
     # node id -> keys of the edges touching it. A dict used as an insertion-ordered set.

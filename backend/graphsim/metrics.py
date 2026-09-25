@@ -8,7 +8,7 @@ from statistics import mean
 
 import networkx as nx
 
-from graphsim.events import Event
+from graphsim.events import TIE_CHANGE_KINDS, Event, ids
 from graphsim.model import Layer, World
 from graphsim.stats import NodeStats, TickMetrics
 
@@ -181,6 +181,7 @@ def _log_community_formed(world: World, label: int, members: set[str], social: n
         tuple(ordered),
         f"Community {label} formed around {', '.join(world.name(h) for h in hubs)}",
         cause=f"{len(members)} agents became more tied to each other than to outsiders",
+        caused_by=_tie_changes_among(world, members),
     )
 
 
@@ -193,6 +194,7 @@ def _log_community_dissolved(world: World, label: int, members: set[str]) -> Non
         f"Community {label} broke apart",
         cause=f"{len(members) - len(still_here)} of its {len(members)} members left the world; "
         "the rest's ties weakened or merged into other groups",
+        caused_by=_tie_changes_among(world, members),
     )
 
 
@@ -219,33 +221,35 @@ def _update_top_broker(world: World, betweenness: dict[str, float], trade: nx.Gr
         f"{world.name(leader)} became the main trade broker",
         cause=f"sits on {betweenness[leader]:.0%} of shortest trade paths, "
         f"trading with {trade.degree(leader)} partners",
+        caused_by=ids(world.log.recent(leader, ("trade_started",), limit=5)),
     )
 
 
 def _detect_component_change(world: World, before: int, after: int) -> None:
     if after == before:
         return
-    removals = [
-        e.message
-        for e in _events_this_tick(world)
-        if e.kind in ("tie_faded", "tie_dropped", "left")
-    ]
+    this_tick = world.log.this_tick(world.tick)
     if after > before:
         kind, message = "network_split", f"The social network split into {after} groups"
-        cause = "; ".join(removals[:3]) or "ties between groups faded"
+        removals = [e for e in this_tick if e.kind in ("tie_faded", "tie_dropped", "left")]
+        cause = "; ".join(e.message for e in removals[:3]) or "ties between groups faded"
+        caused_by = ids(removals[:5])
     else:
         kind, message = "network_merged", f"Social groups merged ({before} → {after})"
+        additions = [e for e in this_tick if e.kind in ("met", "introduced")]
         cause = "new ties bridged separate groups"
-    world.log.add(world.tick, kind, (), message, cause)
+        caused_by = ids(additions[:5])
+    world.log.add(world.tick, kind, (), message, cause, caused_by)
 
 
-def _events_this_tick(world: World) -> list[Event]:
-    events = []
-    for event in reversed(world.log.events):
-        if event.tick != world.tick:
-            break
-        events.append(event)
-    return events[::-1]
+def _tie_changes_among(world: World, members: set[str], limit: int = 8) -> tuple[int, ...]:
+    """This tick's events that added or removed ties involving the community's members."""
+    changes: list[Event] = [
+        e
+        for e in world.log.this_tick(world.tick)
+        if e.kind in TIE_CHANGE_KINDS and members & set(e.subjects)
+    ]
+    return ids(changes[:limit])
 
 
 def _detect_inequality_jump(world: World, gini_now: float) -> None:
@@ -266,4 +270,5 @@ def _detect_inequality_jump(world: World, gini_now: float) -> None:
         (richest.id,),
         f"Inequality rose sharply (Gini {gini_before:.2f} → {gini_now:.2f})",
         cause=f"richest: {richest.name}, a {richest.occupation}, with {richest.coin:.0f} coin",
+        caused_by=ids(world.log.recent(richest.id, ("trade_started",), limit=5)),
     )

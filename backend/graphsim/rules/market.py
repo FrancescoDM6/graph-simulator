@@ -9,6 +9,7 @@ everyone else goes broke, and trade stops.
 """
 
 from graphsim.model import World
+from graphsim.rules.needs import drought_cause
 
 
 def update_prices(world: World) -> None:
@@ -51,6 +52,9 @@ def _log_big_moves(
         return
     world.logged_prices[good] = price
     direction = "rose" if price > last_logged else "fell"
+    # Point at a few of the attempts that pushed the price this way.
+    pushing = ("no_surplus",) if direction == "rose" else ("cannot_afford", "refused")
+    examples = [i.event_id for i in world.interactions if i.good == good and i.outcome in pushing]
     world.log.add(
         world.tick,
         f"price_{direction}",
@@ -58,4 +62,5 @@ def _log_big_moves(
         f"The price of {good} {direction} to {price:.2f}",
         cause=f"of {attempts} attempts to buy {good} this tick, {shortages} found nothing "
         f"to spare and {unaffordable} couldn't pay",
+        caused_by=drought_cause(world, good) + tuple(examples[:5]),
     )

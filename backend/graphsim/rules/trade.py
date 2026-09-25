@@ -14,7 +14,17 @@ recorded here as Interactions; relationships.py applies them in the next phase.
 from dataclasses import dataclass
 
 from graphsim.model import Agent, Interaction, Layer, World
-from graphsim.rules.needs import current_wants
+from graphsim.rules.needs import current_wants, drought_cause, starving_cause
+
+# The event kind logged for each interaction outcome. Gifts and refusals are notable;
+# ordinary trade attempts are detail events (see events.py).
+EVENT_KINDS = {
+    "success": "trade",
+    "gift": "gift",
+    "refused": "refused",
+    "no_surplus": "no_surplus",
+    "cannot_afford": "cannot_afford",
+}
 
 
 @dataclass(frozen=True)
@@ -102,12 +112,54 @@ def unit_price(world: World, offer: Offer, buyer: Agent, good: str) -> tuple[flo
 
 
 def _buy(world: World, buyer: Agent, good: str, amount: float) -> None:
+    reserve = world.cfg.goods[good].reserve
+    why = f"{buyer.name} had {buyer.inventory[good]:.1f} {good}, wanted at least {reserve:g}"
+    context = starving_cause(world, buyer) + drought_cause(world, good)
     offers = available_offers(world, buyer, good)
+    if not offers:
+        world.log.add(
+            world.tick,
+            "no_offers",
+            (buyer.id,),
+            f"{buyer.name} found nobody selling {good}",
+            cause=why,
+            caused_by=context,
+            detail=True,
+        )
+        return
     for offer in _pick_offers(world, buyer.id, offers, world.cfg.trade.max_attempts):
         interaction = _attempt_trade(world, buyer, offer, good, amount)
+        _log_interaction(world, interaction, why, context)
         world.interactions.append(interaction)
         if interaction.outcome in ("success", "gift"):
             return
+
+
+def _log_interaction(
+    world: World, interaction: Interaction, why: str, context: tuple[int, ...]
+) -> None:
+    buyer, seller = world.name(interaction.buyer), world.name(interaction.seller)
+    subjects = (interaction.buyer, interaction.seller)
+    if interaction.broker:
+        subjects += (interaction.broker,)
+    if interaction.outcome == "gift":
+        subjects = (interaction.seller, interaction.buyer)
+        message = f"{seller} gave {interaction.amount:.1f} {interaction.good} to {buyer}"
+        cause = interaction.cause
+    elif interaction.outcome == "refused":
+        message, cause = f"{seller} refused to help {buyer}", interaction.cause
+    else:
+        message, cause = interaction.cause, why
+    event = world.log.add(
+        world.tick,
+        EVENT_KINDS[interaction.outcome],
+        subjects,
+        message,
+        cause=cause,
+        caused_by=context,
+        detail=interaction.outcome not in ("gift", "refused"),
+    )
+    interaction.event_id = event.id
 
 
 def _pick_offers(world: World, buyer_id: str, offers: list[Offer], count: int) -> list[Offer]:

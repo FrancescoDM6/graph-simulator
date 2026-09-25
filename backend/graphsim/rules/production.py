@@ -14,10 +14,21 @@ def update_season(world: World) -> None:
     )
     if in_drought and not world.drought:
         world.drought = True
-        world.log.add(world.tick, "drought_started", (), "A drought began", cause="the dry season")
+        event = world.log.add(
+            world.tick, "drought_started", (), "A drought began", cause="the dry season"
+        )
+        world.drought_event = event.id
     elif not in_drought and world.drought:
         world.drought = False
-        world.log.add(world.tick, "drought_ended", (), "The drought ended", cause="rain returned")
+        world.log.add(
+            world.tick,
+            "drought_ended",
+            (),
+            "The drought ended",
+            cause="rain returned",
+            caused_by=(world.drought_event,) if world.drought_event is not None else (),
+        )
+        world.drought_event = None
 
 
 def regenerate_sites(world: World) -> None:
