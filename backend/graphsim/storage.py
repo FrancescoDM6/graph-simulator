@@ -1,0 +1,406 @@
+"""The run database: every run the simulator has computed, in one SQLite file.
+
+Nothing is ever overwritten: re-running with different settings creates a new run, so runs can
+always be compared. The schema below is the whole data model; the functions after it are the
+only code that reads or writes it (used by the runner, the API and the analysis).
+
+Many tables are "long": one row per (run, tick, thing), which is easy to query from pandas:
+    pd.read_sql("select * from tick_metrics where run_id = 3", sqlite3.connect(path))
+"""
+
+import gzip
+import json
+import sqlite3
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+SCHEMA = """
+create table if not exists runs (
+    id integer primary key,
+    created text not null,
+    scenario text not null,
+    variant text not null,
+    overrides text not null,        -- JSON {"section.key": value}
+    seed integer not null,
+    ticks integer not null,
+    level text not null,            -- "summary" or "full" (see scenario.toml [recording])
+    config_hash text not null,
+    config_json text not null,      -- the exact SimConfig used
+    code_version text not null,     -- git commit, "+<hash>" if there were local changes
+    experiment text not null,       -- experiment name, or "" for a one-off run
+    label text not null,
+    status text not null,           -- "running", "done" or "failed"
+    ticks_done integer not null
+);
+create table if not exists tick_metrics (
+    run_id integer, tick integer, name text, value real,
+    primary key (run_id, name, tick)
+) without rowid;
+create table if not exists agents (
+    run_id integer, agent_id text, name text, occupation text, home text,
+    arrived integer, departed integer, departure_event integer, founding integer,
+    primary key (run_id, agent_id)
+) without rowid;
+create table if not exists agent_ticks (
+    run_id integer, agent_id text, tick integer,
+    occupation text, org text, community integer, coin real, inventory text,
+    mean_trust real, social_ties integer, trade_ties integer, betweenness real,
+    bought integer, sold integer, brokered integer, gifts_given integer, gifts_received integer,
+    hunger integer,
+    primary key (run_id, agent_id, tick)
+) without rowid;
+create table if not exists events (
+    run_id integer, id integer, tick integer, kind text, subjects text,
+    message text, cause text, detail integer,
+    primary key (run_id, id)
+) without rowid;
+create index if not exists events_by_tick on events (run_id, tick);
+create table if not exists event_subjects (
+    run_id integer, entity text, event_id integer,
+    primary key (run_id, entity, event_id)
+) without rowid;
+create table if not exists event_causes (
+    run_id integer, event_id integer, cause_id integer,
+    primary key (run_id, event_id, cause_id)
+) without rowid;
+create index if not exists event_effects on event_causes (run_id, cause_id);
+create table if not exists trust_changes (
+    run_id integer, tick integer, a text, b text, before real, after real, event_id integer
+);
+create index if not exists trust_by_agent_a on trust_changes (run_id, a, tick);
+create index if not exists trust_by_agent_b on trust_changes (run_id, b, tick);
+create table if not exists communities (
+    run_id integer, community_id integer, born integer, died integer, fate text,
+    parent integer, merged_into integer, peak_size integer, members_ever integer,
+    mean_turnover real, continuations integer,
+    primary key (run_id, community_id)
+) without rowid;
+create table if not exists community_ticks (
+    run_id integer, tick integer, community_id integer, size integer, members text,
+    primary key (run_id, community_id, tick)
+) without rowid;
+create table if not exists snapshots (
+    run_id integer, tick integer, data blob,   -- gzipped JSON from serialize.snapshot
+    primary key (run_id, tick)
+) without rowid;
+create table if not exists run_measures (
+    run_id integer, name text, value real,
+    primary key (run_id, name)
+) without rowid;
+"""
+
+LEVELS = ("summary", "full")  # a "full" run can stand in for a "summary" one, not vice versa
+
+
+@dataclass
+class Batch:
+    """Rows produced by the recorder for a stretch of ticks, ready to insert."""
+
+    ticks_done: int = 0
+    metrics: list[tuple] = field(default_factory=list)  # (tick, name, value)
+    agents: list[tuple] = field(default_factory=list)  # see the agents table
+    agent_ticks: list[tuple] = field(default_factory=list)
+    events: list[tuple] = field(default_factory=list)  # (id, tick, kind, subjects, ...)
+    event_subjects: list[tuple] = field(default_factory=list)  # (entity, event_id)
+    event_causes: list[tuple] = field(default_factory=list)  # (event_id, cause_id)
+    trust_changes: list[tuple] = field(default_factory=list)
+    community_ticks: list[tuple] = field(default_factory=list)
+    snapshots: list[tuple] = field(default_factory=list)  # (tick, gzipped JSON)
+    communities: list[tuple] = field(default_factory=list)  # only in the final batch
+    measures: dict[str, float] = field(default_factory=dict)  # only in the final batch
+
+
+def connect(path: Path | str) -> sqlite3.Connection:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("pragma journal_mode = wal")  # readers aren't blocked by a run being written
+    conn.execute("pragma synchronous = normal")
+    conn.executescript(SCHEMA)
+    return conn
+
+
+# --- writing ----------------------------------------------------------------------------------
+
+
+def create_run(conn: sqlite3.Connection, meta: dict[str, Any]) -> int:
+    columns = ", ".join(meta)
+    placeholders = ", ".join("?" for _ in meta)
+    with conn:
+        cursor = conn.execute(
+            f"insert into runs ({columns}) values ({placeholders})", list(meta.values())
+        )
+    return int(cursor.lastrowid)
+
+
+def write_batch(conn: sqlite3.Connection, run_id: int, batch: Batch) -> None:
+    def insert(table: str, rows: list[tuple], replace: bool = False) -> None:
+        if not rows:
+            return
+        verb = "insert or replace" if replace else "insert"
+        placeholders = ", ".join("?" for _ in range(len(rows[0]) + 1))
+        conn.executemany(
+            f"{verb} into {table} values ({placeholders})", [(run_id, *row) for row in rows]
+        )
+
+    with conn:
+        insert("tick_metrics", [(tick, name, value) for tick, name, value in batch.metrics])
+        insert("agents", batch.agents, replace=True)
+        insert("agent_ticks", batch.agent_ticks)
+        insert("events", batch.events)
+        insert("event_subjects", batch.event_subjects)
+        insert("event_causes", batch.event_causes)
+        insert("trust_changes", batch.trust_changes)
+        insert("community_ticks", batch.community_ticks)
+        insert("snapshots", batch.snapshots)
+        insert("communities", batch.communities, replace=True)
+        insert("run_measures", list(batch.measures.items()), replace=True)
+        conn.execute("update runs set ticks_done = ? where id = ?", (batch.ticks_done, run_id))
+
+
+def set_status(conn: sqlite3.Connection, run_id: int, status: str) -> None:
+    with conn:
+        conn.execute("update runs set status = ? where id = ?", (status, run_id))
+
+
+def delete_run(conn: sqlite3.Connection, run_id: int) -> None:
+    """Removes a run and all its rows (used to clean up runs that failed half-way)."""
+    tables = [
+        "tick_metrics", "agents", "agent_ticks", "events", "event_subjects", "event_causes",
+        "trust_changes", "communities", "community_ticks", "snapshots", "run_measures",
+    ]  # fmt: skip
+    with conn:
+        for table in tables:
+            conn.execute(f"delete from {table} where run_id = ?", (run_id,))
+        conn.execute("delete from runs where id = ?", (run_id,))
+
+
+# --- reading ----------------------------------------------------------------------------------
+
+
+def find_cached_run(
+    conn: sqlite3.Connection, config_hash: str, seed: int, ticks: int, level: str, code: str
+) -> int | None:
+    """A finished run with exactly these settings, at this level of detail or more."""
+    acceptable = LEVELS[LEVELS.index(level) :]
+    placeholders = ", ".join("?" for _ in acceptable)
+    row = conn.execute(
+        f"""select id from runs where config_hash = ? and seed = ? and ticks = ?
+            and code_version = ? and status = 'done' and level in ({placeholders})
+            order by id desc limit 1""",
+        (config_hash, seed, ticks, code, *acceptable),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def list_runs(conn: sqlite3.Connection, experiment: str | None = None) -> list[dict[str, Any]]:
+    query = """select id, created, scenario, variant, overrides, seed, ticks, level, config_hash,
+                      code_version, experiment, label, status, ticks_done from runs"""
+    params: tuple = ()
+    if experiment is not None:
+        query += " where experiment = ?"
+        params = (experiment,)
+    rows = conn.execute(query + " order by id", params).fetchall()
+    return [_run_dict(row) for row in rows]
+
+
+def get_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
+    row = conn.execute("select * from runs where id = ?", (run_id,)).fetchone()
+    return _run_dict(row) if row else None
+
+
+def metric_names(conn: sqlite3.Connection, run_id: int) -> list[str]:
+    rows = conn.execute(
+        "select distinct name from tick_metrics where run_id = ? order by name", (run_id,)
+    ).fetchall()
+    return [row["name"] for row in rows]
+
+
+def metric_series(
+    conn: sqlite3.Connection, run_id: int, names: list[str] | None = None
+) -> dict[str, list[tuple[int, float]]]:
+    """name -> [(tick, value), ...] in tick order."""
+    query = "select name, tick, value from tick_metrics where run_id = ?"
+    params: list[Any] = [run_id]
+    if names:
+        query += f" and name in ({', '.join('?' for _ in names)})"
+        params += names
+    series: dict[str, list[tuple[int, float]]] = {}
+    for row in conn.execute(query + " order by name, tick", params):
+        series.setdefault(row["name"], []).append((row["tick"], row["value"]))
+    return series
+
+
+def snapshots(conn: sqlite3.Connection, run_id: int, first: int, count: int) -> list[dict]:
+    rows = conn.execute(
+        "select data from snapshots where run_id = ? and tick >= ? order by tick limit ?",
+        (run_id, first, count),
+    ).fetchall()
+    return [json.loads(gzip.decompress(row["data"])) for row in rows]
+
+
+def events(
+    conn: sqlite3.Connection,
+    run_id: int,
+    first_tick: int = 0,
+    last_tick: int | None = None,
+    entity: str | None = None,
+    include_detail: bool = False,
+    kinds: list[str] | None = None,
+    limit: int = 1000,
+) -> list[dict[str, Any]]:
+    query = "select e.* from events e"
+    conditions = ["e.run_id = ?", "e.tick >= ?"]
+    params: list[Any] = [run_id, first_tick]
+    if entity:
+        query += " join event_subjects s on s.run_id = e.run_id and s.event_id = e.id"
+        conditions.append("s.entity = ?")
+        params.append(entity)
+    if last_tick is not None:
+        conditions.append("e.tick <= ?")
+        params.append(last_tick)
+    if not include_detail:
+        conditions.append("e.detail = 0")
+    if kinds:
+        conditions.append(f"e.kind in ({', '.join('?' for _ in kinds)})")
+        params += kinds
+    query += " where " + " and ".join(conditions) + " order by e.id limit ?"
+    rows = conn.execute(query, [*params, limit]).fetchall()
+    return [_event_dict(conn, run_id, row) for row in rows]
+
+
+def event(conn: sqlite3.Connection, run_id: int, event_id: int) -> dict[str, Any] | None:
+    row = conn.execute(
+        "select * from events where run_id = ? and id = ?", (run_id, event_id)
+    ).fetchone()
+    return _event_dict(conn, run_id, row) if row else None
+
+
+def causal_trail(
+    conn: sqlite3.Connection, run_id: int, event_id: int, depth: int = 4
+) -> dict[str, Any] | None:
+    """The event with its causes nested inside it, `depth` levels back. Causes that weren't
+    stored (detail events of a summary-level run) appear as {"id": ..., "missing": True}."""
+    root = event(conn, run_id, event_id)
+    if root is None:
+        return None
+
+    def expand(node: dict[str, Any], remaining: int) -> dict[str, Any]:
+        causes = []
+        for cause_id in node["caused_by"]:
+            cause = event(conn, run_id, cause_id)
+            if cause is None:
+                causes.append({"id": cause_id, "missing": True})
+            elif remaining > 1:
+                causes.append(expand(cause, remaining - 1))
+            else:
+                causes.append({**cause, "causes": None})  # None = not expanded yet
+        return {**node, "causes": causes}
+
+    return expand(root, depth)
+
+
+def agents(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute("select * from agents where run_id = ? order by agent_id", (run_id,))
+    return [dict(row) for row in rows]
+
+
+def agent_history(conn: sqlite3.Connection, run_id: int, agent_id: str) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "select * from agent_ticks where run_id = ? and agent_id = ? order by tick",
+        (run_id, agent_id),
+    ).fetchall()
+    return [{**dict(row), "inventory": json.loads(row["inventory"])} for row in rows]
+
+
+def trust_changes(
+    conn: sqlite3.Connection,
+    run_id: int,
+    agent: str,
+    other: str | None = None,
+    first_tick: int = 0,
+    last_tick: int | None = None,
+) -> list[dict[str, Any]]:
+    """Every trust change on the agent's ties (optionally only with `other`), oldest first."""
+    last = last_tick if last_tick is not None else 1 << 62
+    rows = conn.execute(
+        """select * from trust_changes where run_id = ? and (a = ? or b = ?)
+           and tick between ? and ? order by tick, rowid""",
+        (run_id, agent, agent, first_tick, last),
+    ).fetchall()
+    changes = [dict(row) for row in rows]
+    if other:
+        changes = [c for c in changes if other in (c["a"], c["b"])]
+    return changes
+
+
+def communities(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "select * from communities where run_id = ? order by community_id", (run_id,)
+    )
+    return [dict(row) for row in rows]
+
+
+def community_sizes(conn: sqlite3.Connection, run_id: int) -> dict[int, list[tuple[int, int]]]:
+    """community id -> [(tick, size), ...] (full-level runs only)."""
+    sizes: dict[int, list[tuple[int, int]]] = {}
+    rows = conn.execute(
+        "select community_id, tick, size from community_ticks where run_id = ? order by tick",
+        (run_id,),
+    )
+    for row in rows:
+        sizes.setdefault(row["community_id"], []).append((row["tick"], row["size"]))
+    return sizes
+
+
+def community_members(conn: sqlite3.Connection, run_id: int, tick: int) -> dict[int, list[str]]:
+    """community id -> members at the latest detection at or before `tick`."""
+    row = conn.execute(
+        "select max(tick) as t from community_ticks where run_id = ? and tick <= ?",
+        (run_id, tick),
+    ).fetchone()
+    if row is None or row["t"] is None:
+        return {}
+    rows = conn.execute(
+        "select community_id, members from community_ticks where run_id = ? and tick = ?",
+        (run_id, row["t"]),
+    )
+    return {r["community_id"]: json.loads(r["members"]) for r in rows}
+
+
+def measures(conn: sqlite3.Connection, run_id: int) -> dict[str, float]:
+    rows = conn.execute("select name, value from run_measures where run_id = ?", (run_id,))
+    return {row["name"]: row["value"] for row in rows}
+
+
+def event_counts(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
+    rows = conn.execute(
+        "select kind, count(*) as n from events where run_id = ? group by kind", (run_id,)
+    )
+    return {row["kind"]: row["n"] for row in rows}
+
+
+def _run_dict(row: sqlite3.Row) -> dict[str, Any]:
+    run = dict(row)
+    run["overrides"] = json.loads(run["overrides"])
+    run.pop("config_json", None)
+    return run
+
+
+def _event_dict(conn: sqlite3.Connection, run_id: int, row: sqlite3.Row) -> dict[str, Any]:
+    causes = conn.execute(
+        "select cause_id from event_causes where run_id = ? and event_id = ? order by cause_id",
+        (run_id, row["id"]),
+    ).fetchall()
+    return {
+        "id": row["id"],
+        "tick": row["tick"],
+        "kind": row["kind"],
+        "subjects": json.loads(row["subjects"]),
+        "message": row["message"],
+        "cause": row["cause"],
+        "detail": bool(row["detail"]),
+        "caused_by": [c["cause_id"] for c in causes],
+    }

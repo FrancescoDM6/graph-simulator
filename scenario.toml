@@ -335,6 +335,7 @@ metrics_every = 5
 agent_history_every = 0   # 0 = never (agent lifetimes are always stored)
 detail_events = false
 trust_ledger = false
+community_history = false
 snapshots = false
 
 [recording.full]
@@ -342,6 +343,7 @@ metrics_every = 1
 agent_history_every = 1
 detail_events = true
 trust_ledger = true
+community_history = true
 snapshots = true
 
 

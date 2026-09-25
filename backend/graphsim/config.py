@@ -287,6 +287,7 @@ class RecordingSpec:
     agent_history_every: int  # 0 = never
     detail_events: bool
     trust_ledger: bool
+    community_history: bool  # members of every community at every detection
     snapshots: bool
 
 
