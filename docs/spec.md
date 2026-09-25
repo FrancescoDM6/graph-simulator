@@ -151,7 +151,7 @@ Structural events are logged when:
 These are what tuning aimed for. `python -m graphsim.cli` reports all four.
 
 1. **Brokers.** Merchants hold a disproportionate share of trade-layer betweenness. *Observed
-   (seeds 1–3):* 55–85% of betweenness from about 10% of the population. One merchant usually
+   (seeds 1–3):* 50–85% of betweenness from about 10% of the population. One merchant usually
    becomes dominant, because buyers return to regular partners.
 2. **Factions.** The social graph forms communities that split and merge over time.
    *Observed:* 2–4 communities, with a few formation/dissolution events per 100 ticks.
