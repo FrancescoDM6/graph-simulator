@@ -3,7 +3,6 @@
 The TypeScript mirror of these shapes is frontend/src/types.ts. Change both together.
 """
 
-from dataclasses import asdict
 from typing import Any
 
 from graphsim.events import Event
@@ -19,7 +18,8 @@ def snapshot(world: World, events: list[Event]) -> dict[str, Any]:
         "prices": {good: round(price, 3) for good, price in world.prices.items()},
         "nodes": _nodes(world),
         "edges": [edge_dict(e) for e in world.edges.values()],
-        "metrics": asdict(history[-1]) if history else None,
+        "metrics": history[-1] if history else None,
+        "top_broker": world.metrics.top_broker,
         "events": [event_dict(e) for e in events],
     }
 
@@ -58,8 +58,7 @@ def _nodes(world: World) -> list[dict[str, Any]]:
                 "name": agent.name,
                 "occupation": str(agent.occupation),
                 "home": agent.home,
-                "food": round(agent.food, 2),
-                "ore": round(agent.ore, 2),
+                "inventory": {good: round(held, 2) for good, held in agent.inventory.items()},
                 "coin": round(agent.coin, 2),
                 "hunger_ticks": agent.hunger_ticks,
                 "need": agent.need,

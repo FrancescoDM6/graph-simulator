@@ -5,38 +5,14 @@ Kept separate from metrics.py so model.py can hold them without a circular impor
 
 from dataclasses import dataclass, field
 
-
-@dataclass
-class TickMetrics:
-    tick: int
-    population: int
-    farmers: int
-    miners: int
-    merchants: int
-    total_food: float
-    total_coin: float
-    price_food: float
-    price_ore: float
-    gini_coin: float
-    social_density: float
-    social_components: int  # connected groups of at least cfg.min_component_size agents
-    social_clustering: float
-    communities: int
-    avg_trust: float
-    trades: int
-    failed_trades: int
-    gifts: int
-    starving: int
-    orgs: int
-    drought: bool
-    top_broker: str  # agent id with the highest trade-layer betweenness ("" if none)
-    top_broker_betweenness: float
-    merchant_broker_share: float  # merchants' share of total trade-layer betweenness
+# One tick's measurements: metric name -> value, e.g. {"tick": 12, "gini_coin": 0.41, ...}.
+# Per-good and per-occupation metrics are named "stock.food", "population.farmer", etc.
+TickMetrics = dict[str, float]
 
 
 @dataclass
 class NodeStats:
-    community: int  # stable community label, -1 if none
+    community: int  # stable community id, -1 if none
     betweenness: float  # trade-layer betweenness centrality
     degree: int  # social + trade ties
 

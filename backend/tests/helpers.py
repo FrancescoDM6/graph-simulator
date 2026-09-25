@@ -1,17 +1,18 @@
 """Tiny hand-built worlds for testing one rule at a time."""
 
-from dataclasses import replace
+from typing import Any
 
-from graphsim.config import SimConfig
-from graphsim.model import Agent, Layer, Occupation, Town, World
+from graphsim.config import load_scenario
+from graphsim.model import Agent, Layer, Town, World
 from graphsim.world_gen import create_agent, empty_world
 
 TOWN = "town-001"
 
 
-def make_world(**config_overrides) -> World:
-    """A world with a single town and no agents. Override config fields by keyword."""
-    world = empty_world(replace(SimConfig(), **config_overrides), seed=0)
+def make_world(overrides: dict[str, Any] | None = None, variant: str = "baseline") -> World:
+    """A world with a single town and no agents, using scenario.toml plus any overrides,
+    e.g. make_world({"relationships.max_social_ties": 2})."""
+    world = empty_world(load_scenario().config(variant, overrides), seed=0)
     add_town(world, "Testville")  # gets the id TOWN
     return world
 
@@ -26,7 +27,7 @@ def add_town(world: World, name: str, road_to: str | None = None) -> str:
 
 def add_agent(
     world: World,
-    occupation: Occupation,
+    occupation: str,
     *,
     food: float = 8.0,
     ore: float = 0.0,
@@ -34,7 +35,7 @@ def add_agent(
     home: str = TOWN,
 ) -> Agent:
     agent = create_agent(world, occupation, home)
-    agent.food, agent.ore, agent.coin = food, ore, coin
+    agent.inventory["food"], agent.inventory["ore"], agent.coin = food, ore, coin
     return agent
 
 

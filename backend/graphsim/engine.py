@@ -13,7 +13,7 @@ def step(world: World) -> list[Event]:
     world.interactions.clear()
 
     # 1. Consume: eat, starve, leave, arrive
-    needs.consume_food(world)
+    needs.consume(world)
     needs.maybe_add_newcomer(world)
 
     # 2. Produce

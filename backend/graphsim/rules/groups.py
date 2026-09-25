@@ -7,10 +7,10 @@ with each other across towns.
 
 from graphsim.model import Agent, Layer, Org, World, edge_key
 
-ORG_WORDS = ["Circle", "Company", "League", "Society", "Union", "Guild", "Lodge", "Fellowship"]
-
 
 def update_memberships(world: World) -> None:
+    if not world.cfg.mechanisms.organizations:
+        return
     agents = list(world.agents.values())
     world.rng.shuffle(agents)
     for agent in agents:
@@ -29,7 +29,7 @@ def _maybe_leave(world: World, agent: Agent, org_id: str) -> None:
         cause = "no longer knows any fellow member"
     else:
         average = sum(known_trust) / len(known_trust)
-        if average >= world.cfg.leave_below_trust:
+        if average >= world.cfg.organizations.leave_below_trust:
             return
         cause = f"average trust in fellow members fell to {average:.2f}"
     world.remove_edge(edge_key(agent.id, org_id, Layer.MEMBERSHIP))
@@ -55,7 +55,7 @@ def _maybe_join(world: World, agent: Agent) -> bool:
         if score > best_score:
             best_org, best_score = org_id, score
             best_friends = [m for _, m in sorted(trusted, reverse=True)[:2]]
-    if best_score < world.cfg.join_score:
+    if best_score < world.cfg.organizations.join_score:
         return False
 
     world.add_edge(agent.id, best_org, Layer.MEMBERSHIP)
@@ -72,7 +72,7 @@ def _maybe_join(world: World, agent: Agent) -> bool:
 
 def _maybe_found(world: World, agent: Agent) -> None:
     """An agent with enough trusted, unaffiliated friends may start an org with them."""
-    cfg = world.cfg
+    cfg = world.cfg.organizations
     if len(world.orgs) >= cfg.max_orgs:
         return
     friends = [
@@ -85,7 +85,7 @@ def _maybe_found(world: World, agent: Agent) -> None:
 
     org = Org(
         id=world.new_id("org"),
-        name=f"{agent.name}'s {world.rng.choice(ORG_WORDS)}",
+        name=f"{agent.name}'s {world.rng.choice(cfg.name_words)}",
         home=agent.home,
         founded=world.tick,
     )

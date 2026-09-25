@@ -7,7 +7,7 @@ from pathlib import Path
 from statistics import mean
 
 from graphsim import engine
-from graphsim.config import SimConfig
+from graphsim.config import load_scenario
 from graphsim.world_gen import build_world
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -16,19 +16,19 @@ HISTORY_HASH_SCRIPT = """
 import hashlib, json
 from dataclasses import asdict
 from graphsim import engine
-from graphsim.config import SimConfig
+from graphsim.config import load_scenario
 from graphsim.world_gen import build_world
-world = build_world(SimConfig(), seed=7)
+world = build_world(load_scenario().config(), seed=7)
 for _ in range(300):
     engine.step(world)
 events = json.dumps([asdict(e) for e in world.log.events])
-metrics = json.dumps([asdict(m) for m in world.metrics.history])
+metrics = json.dumps(world.metrics.history)
 print(hashlib.sha256((events + metrics).encode()).hexdigest())
 """
 
 
 def run_history(seed: int, ticks: int):
-    world = build_world(SimConfig(), seed)
+    world = build_world(load_scenario().config(), seed)
     for _ in range(ticks):
         engine.step(world)
     return world
@@ -60,10 +60,12 @@ def test_history_does_not_depend_on_python_hash_randomization():
 def test_default_world_stays_alive_and_structured():
     world = run_history(seed=1, ticks=2000)
     history = world.metrics.history
-    start_population = history[0].population
+    start_population = history[0]["population"]
     later_half = history[len(history) // 2 :]
 
-    assert min(m.population for m in history) >= start_population * 0.5  # no collapse
-    assert 0.05 < mean(m.social_density for m in later_half) < 0.5  # neither empty nor a hairball
-    assert mean(m.merchant_broker_share for m in later_half) > 0.3  # merchants are brokers
-    assert max(m.communities for m in later_half) >= 2  # more than one faction
+    assert min(m["population"] for m in history) >= start_population * 0.5  # no collapse
+    assert (
+        0.05 < mean(m["social_density"] for m in later_half) < 0.5
+    )  # neither empty nor a hairball
+    assert mean(m["broker_share"] for m in later_half) > 0.3  # merchants are brokers
+    assert max(m["communities"] for m in later_half) >= 2  # more than one faction

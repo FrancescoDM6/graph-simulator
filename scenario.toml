@@ -1,0 +1,389 @@
+# =============================================================================================
+# graph-simulator scenario: every factor the simulation uses, in one file.
+#
+# How it is read (backend/graphsim/config.py):
+#   1. this file,
+#   2. then one [variants.<name>] table deep-merged on top (e.g. to switch a mechanism off),
+#   3. then any `--set section.key=value` overrides from the command line.
+# Every key below is required, and unknown keys are an error, so a typo can't silently
+# change an experiment. Units: goods in abstract "units", time in ticks, trust/strength 0..1.
+# =============================================================================================
+
+[run]
+seed = 1
+ticks = 2000
+database = "runs/graphsim.db" # relative to this file
+
+
+# =============================================================================================
+# ECONOMY: goods, the sites that produce them, and the occupations that work there.
+# Add a good, site kind or occupation here and the rules pick it up; no code changes needed.
+# =============================================================================================
+
+[goods.food]
+eaten_per_tick = 1.0 # > 0 means every agent eats this and goes hungry without it
+spoil_rate = 0.03    # fraction of each agent's holding lost per tick
+start_amount = 8.0   # what every agent starts with (and newcomers bring)
+reserve = 4.0        # agents who need it buy below this; producers only sell above it
+buy_target = 8.0     # buyers try to top up to this
+start_price = 1.0
+max_holding = 40.0   # producers stop producing once they hold this much
+
+[goods.ore]
+eaten_per_tick = 0.0 # not eaten: only used as a tool (see occupations.farmer)
+spoil_rate = 0.0
+start_amount = 3.0
+reserve = 1.0
+buy_target = 3.0
+start_price = 1.5
+max_holding = 40.0
+
+[site_kinds.farm]
+produces = "food"
+capacity = 80.0           # most stock the site can hold
+regen = 26.0              # stock regained per tick
+drought_sensitive = true  # regen is reduced during droughts
+
+[site_kinds.mine]
+produces = "ore"
+capacity = 60.0
+regen = 10.0
+drought_sensitive = false
+
+# works_at: a site kind next to the agent's home town ("" = produces nothing).
+# tool: a good used up by each harvest ("" = none). Without it, output drops to
+#       output_without_tool.
+# brokers: can connect buyers with producers they can't reach, for a commission.
+# reach: "home" or "home_and_neighbours" (towns joined to home by a road).
+# color: used by the viewer.
+[occupations.farmer]
+works_at = "farm"
+output = 3.0
+tool = "ore"
+tool_use = 0.5
+output_without_tool = 2.0
+brokers = false
+reach = "home"
+color = "#7bd88f"
+
+[occupations.miner]
+works_at = "mine"
+output = 1.5
+tool = ""
+tool_use = 0.0
+output_without_tool = 1.5
+brokers = false
+reach = "home"
+color = "#c9a27e"
+
+[occupations.merchant]
+works_at = ""
+output = 0.0
+tool = ""
+tool_use = 0.0
+output_without_tool = 0.0
+brokers = true
+reach = "home_and_neighbours"
+color = "#f5d76e"
+
+
+# =============================================================================================
+# WORLD: towns, their sites and founding population, and the roads between them.
+# Newcomers later fill whichever job a town is most short of, relative to `founding`.
+# =============================================================================================
+
+[world]
+site_access_cost = 0.5
+names = [
+  "Ada", "Alma", "Anselm", "Ansel", "Aurel", "Basil", "Bea", "Bram", "Brin", "Cass",
+  "Cato", "Cora", "Corin", "Dara", "Dell", "Dov", "Edda", "Edric", "Elka", "Emil",
+  "Enna", "Ezra", "Fen", "Finn", "Frida", "Gale", "Gil", "Greta", "Hale", "Hana",
+  "Hugo", "Ida", "Ilse", "Ines", "Ivo", "Jana", "Joss", "Jura", "Kai", "Kira",
+  "Lars", "Lena", "Lio", "Lorn", "Mae", "Mara", "Milo", "Mira", "Nell", "Nils",
+  "Noor", "Odo", "Olan", "Opal", "Orla", "Otto", "Pell", "Pia", "Quill", "Rafe",
+  "Rhea", "Rolf", "Rosa", "Rune", "Saga", "Sela", "Sven", "Tam", "Tess", "Theo",
+  "Tova", "Ulla", "Una", "Vale", "Vera", "Wren", "Yara", "Yves", "Zane", "Zora",
+]
+
+[world.towns.Ashford]
+sites = [{ name = "North Farm", kind = "farm" }]
+founding = { farmer = 12, merchant = 1 }
+
+[world.towns.Millbrook]
+sites = [{ name = "South Farm", kind = "farm" }, { name = "Copper Mine", kind = "mine" }]
+founding = { farmer = 9, miner = 3, merchant = 2 }
+
+[world.towns.Stonehold]
+sites = [{ name = "Iron Mine", kind = "mine" }]
+founding = { miner = 5, merchant = 1 }
+
+[[world.roads]]
+from = "Ashford"
+to = "Millbrook"
+cost = 1.0
+
+[[world.roads]]
+from = "Millbrook"
+to = "Stonehold"
+cost = 1.0
+
+
+# =============================================================================================
+# BEHAVIOUR PARAMETERS
+# =============================================================================================
+
+[population]
+arrival_chance = 0.10        # chance per tick that a newcomer fills an empty job
+start_coin = 15.0
+initial_ties_per_agent = 2   # random acquaintances in the same town at tick 0
+starving_notice_after = 3    # hungry ticks before a "starving" event is logged
+leave_after_hungry = 12      # hungry ticks before the agent leaves the world
+
+[prices]
+adjust_rate = 0.02     # max fractional price change per tick
+min = 0.1
+max = 10.0
+event_change = 0.25    # log a price event after a 25% move since the last one
+town_levy = 0.01       # share of coin each resident pays per tick, split among residents
+
+[trade]
+broker_commission = 0.5   # a broker's cut, as a fraction of the price
+brokered_weight = 0.5     # buyers favour direct deals over going through a broker
+trust_discount = 0.2      # a fully trusted partner gets this fraction off
+max_attempts = 3          # suppliers tried per need per tick
+stranger_weight = 0.3     # partner-choice weight for someone with no social tie
+min_amount = 0.1          # smaller trades than this don't count
+gift_min_strength = 0.6   # tie strength needed before a friend gives food away
+gift_amount = 2.0
+help_keeps_ticks = 2      # a friend only gives what they can spare beyond this many meals
+
+[relationships]
+initial_trust = 0.4
+trust_gain = 0.08          # on success, trust moves this fraction of the way to 1
+trust_loss = 0.1           # when an acquaintance refuses to help, trust drops by this much
+trusted_above = 0.7        # crossing this logs "trusted"
+distrusted_below = 0.25    # crossing this logs "distrusted"
+social_bump = 0.1          # social strength gained per interaction
+trade_bump = 0.2           # trade strength gained per successful trade
+socialize_bump = 0.05      # strength gained when an agent spends a tick with a friend
+social_decay = 0.01        # fraction of social strength lost per idle tick
+trade_decay = 0.04
+trade_friendship_at = 0.5  # trade-tie strength at which partners form a social tie
+prune_below = 0.05         # ties weaker than this disappear
+max_social_ties = 7        # attention limit
+meet_chance = 0.02         # per agent per tick
+meet_strength = 0.25
+intro_chance = 0.02        # per agent per tick
+intro_min_strength = 0.5   # only close friends make introductions
+
+[organizations]
+join_score = 1.2          # summed trust in an org's members needed to join it
+leave_below_trust = 0.35  # average trust in fellow members needed to stay
+found_chance = 0.02
+found_min_friends = 3
+found_min_trust = 0.6
+max_orgs = 6
+name_words = ["Circle", "Company", "League", "Society", "Union", "Guild", "Lodge", "Fellowship"]
+
+[seasons]
+drought_every = 200        # ticks between drought starts (the first starts at this tick)
+drought_length = 60
+drought_regen_factor = 0.4 # regen multiplier for drought-sensitive sites during a drought
+
+[metrics]
+min_component_size = 3         # smaller connected groups (e.g. a lone newcomer) aren't counted
+min_community_size = 4
+community_match_jaccard = 0.3  # overlap needed for a community to keep its identity
+community_min_lifespan = 5     # shorter-lived communities are reported as detection flicker
+gini_window = 50
+gini_jump = 0.08
+broker_overtake_margin = 1.1   # a new top broker must beat the old one by 10%
+min_broker_betweenness = 0.1   # below this nobody counts as the top broker
+
+
+# =============================================================================================
+# MECHANISMS: switch whole behaviours on and off (for ablations, see [variants]).
+# =============================================================================================
+
+[mechanisms]
+gifting = true             # close friends give food to starving friends
+brokering = true           # false also removes broker occupations from founding and newcomers
+meetings = true            # chance meetings between townspeople
+introductions = true       # friends of friends get introduced (triadic closure)
+trade_friendships = true   # regular trading partners form social ties
+organizations = true       # agents found, join and leave orgs
+droughts = true
+price_adjustment = true    # prices react to shortages and unpaid attempts
+town_levy = true           # towns redistribute a share of residents' coin
+attention_limit = true     # agents can hold at most max_social_ties social ties
+# "dynamic" | "frozen_topology" (no social ties added or removed after tick 0; strength and
+# trust still change) | "frozen" (social ties, strengths and trust never change)
+social_dynamics = "dynamic"
+# "network" (reachable partners, weighted by trust and habit) | "random_reachable" (reachable
+# partners, uniformly at random) | "random_global" (any producer in the world, no brokers)
+partner_choice = "network"
+
+
+# =============================================================================================
+# VARIANTS: named overrides, deep-merged onto everything above.
+# =============================================================================================
+
+[variants.baseline]
+description = "The scenario exactly as written above."
+
+[variants.no_gifting]
+description = "Close friends never give food away."
+mechanisms = { gifting = false }
+
+[variants.no_merchants]
+description = "No brokers at all. Note: this also shrinks the population by the merchants."
+mechanisms = { brokering = false }
+
+[variants.no_introductions]
+description = "No triadic closure."
+mechanisms = { introductions = false }
+
+[variants.no_organizations]
+description = "Organizations never form."
+mechanisms = { organizations = false }
+
+[variants.no_droughts]
+description = "Farms regenerate fully every tick."
+mechanisms = { droughts = false }
+
+[variants.static_social]
+description = "The social graph's topology is frozen at tick 0 (trust and strength still change)."
+mechanisms = { social_dynamics = "frozen_topology" }
+
+[variants.frozen_social]
+description = "Social ties, strengths and trust never change after tick 0."
+mechanisms = { social_dynamics = "frozen" }
+
+[variants.random_partners]
+description = "Buyers pick any producer in the world uniformly at random: no network routing."
+mechanisms = { partner_choice = "random_global" }
+
+[variants.random_reachable_partners]
+description = "Buyers pick uniformly among partners they can reach: geography, but no trust or habit."
+mechanisms = { partner_choice = "random_reachable" }
+
+
+# =============================================================================================
+# EXPERIMENTS: batches of runs. `seeds` is a range "a-b" or a list.
+# `sweep` generates one variant per value, e.g. sweep = { "trade.broker_commission" = [0.2, 0.8] }.
+# =============================================================================================
+
+[experiments.ablations]
+description = "Which macro phenomena disappear when one mechanism is removed?"
+seeds = "1-100"
+ticks = 2000
+level = "summary"
+variants = [
+  "baseline", "no_gifting", "no_merchants", "no_introductions", "no_organizations",
+  "no_droughts", "static_social", "random_partners",
+]
+sweep = {}
+
+[experiments.commission_sweep]
+description = "How broker power depends on the commission."
+seeds = "1-30"
+ticks = 2000
+level = "summary"
+variants = ["baseline"]
+sweep = { "trade.broker_commission" = [0.1, 0.3, 0.5, 0.8] }
+
+
+# =============================================================================================
+# PHENOMENA: when does a run "show" a phenomenon? `measure` names a run-level measure defined
+# in backend/graphsim/analysis.py; `present_if` compares it with a threshold.
+# =============================================================================================
+
+[phenomena.brokerage]
+description = "Brokers hold far more of the trade network's betweenness than their numbers suggest."
+measure = "broker_share_ratio"
+present_if = ">= 2.0"
+
+[phenomena.factions]
+description = "The social graph keeps several communities."
+measure = "mean_communities"
+present_if = ">= 2.0"
+
+[phenomena.drought_shock]
+description = "Droughts cause starvation."
+measure = "drought_starvation_ratio"
+present_if = ">= 2.0"
+
+[phenomena.inequality]
+description = "Coin becomes unequally distributed."
+measure = "gini_final"
+present_if = ">= 0.4"
+
+[phenomena.drought_solidarity]
+description = "Gifting surges during droughts."
+measure = "drought_gift_ratio"
+present_if = ">= 3.0"
+
+
+# =============================================================================================
+# RECORDING: what gets stored per run. "summary" is for big batches; "full" is what the viewer
+# needs (per-tick snapshots, per-agent histories, every trade, the trust ledger).
+# =============================================================================================
+
+[recording.summary]
+metrics_every = 5
+agent_history_every = 0   # 0 = never (agent lifetimes are always stored)
+detail_events = false
+trust_ledger = false
+snapshots = false
+
+[recording.full]
+metrics_every = 1
+agent_history_every = 1
+detail_events = true
+trust_ledger = true
+snapshots = true
+
+
+# =============================================================================================
+# VIEWER: which series the timeline shows. `metric` names a per-tick metric (see metrics.py).
+# =============================================================================================
+
+[[viewer.timeline]]
+metric = "gini_coin"
+label = "Gini (coin)"
+color = "#f28e2b"
+
+[[viewer.timeline]]
+metric = "avg_trust"
+label = "Average trust"
+color = "#6ea8fe"
+
+[[viewer.timeline]]
+metric = "starving"
+label = "Starving agents"
+color = "#ff4d4d"
+
+[[viewer.timeline]]
+metric = "broker_share"
+label = "Broker share of trade betweenness"
+color = "#f5d76e"
+
+[[viewer.timeline]]
+metric = "stock.food"
+label = "Food held"
+color = "#7bd88f"
+
+[[viewer.timeline]]
+metric = "communities"
+label = "Communities"
+color = "#b07aa1"
+
+[[viewer.timeline]]
+metric = "social_components"
+label = "Components"
+color = "#76b7b2"
+
+[[viewer.timeline]]
+metric = "social_clustering"
+label = "Clustering"
+color = "#bab0ac"

@@ -14,13 +14,12 @@ REST
 
 import asyncio
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from graphsim import engine, serialize
-from graphsim.config import SimConfig
+from graphsim.config import load_scenario
 from graphsim.events import Event
 from graphsim.world_gen import build_world
 
@@ -38,7 +37,7 @@ class Simulation:
         self.reset(seed)
 
     def reset(self, seed: int) -> None:
-        self.world = build_world(SimConfig(), seed)
+        self.world = build_world(load_scenario().config(), seed)
         self.last_events: list[Event] = []
 
     def step(self) -> None:
@@ -118,4 +117,4 @@ def entity_history(entity_id: str) -> list[dict[str, Any]]:
 
 @app.get("/api/metrics")
 def recent_metrics(last: int = 200) -> list[dict[str, Any]]:
-    return [asdict(m) for m in sim.world.metrics.history[-last:]]
+    return sim.world.metrics.history[-last:]

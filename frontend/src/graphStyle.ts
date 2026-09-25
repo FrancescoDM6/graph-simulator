@@ -39,7 +39,8 @@ export function nodeData(node: GraphNode): Record<string, string | number> {
         label: node.name,
         size: Math.min(60, 14 + 4 * Math.sqrt(Math.max(node.coin, 0))), // size = wealth
         fill: communityColor(node.community),
-        border: node.hunger_ticks > 0 ? STARVING_COLOR : OCCUPATION_COLORS[node.occupation],
+        border:
+          node.hunger_ticks > 0 ? STARVING_COLOR : (OCCUPATION_COLORS[node.occupation] ?? "#999999"),
       };
     case "town":
       return { id: node.id, kind: node.kind, label: node.name, size: 46, fill: "#343944", border: "#8a90a0" };

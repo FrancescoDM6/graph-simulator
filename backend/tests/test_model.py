@@ -1,10 +1,10 @@
-from graphsim.model import Layer, Occupation
+from graphsim.model import Layer
 from tests.helpers import add_agent, make_world
 
 
 def test_edges_are_undirected():
     world = make_world()
-    a, b = add_agent(world, Occupation.FARMER), add_agent(world, Occupation.MINER)
+    a, b = add_agent(world, "farmer"), add_agent(world, "miner")
     world.add_edge(b.id, a.id, Layer.SOCIAL, strength=0.7)
 
     assert world.get_edge(a.id, b.id, Layer.SOCIAL).strength == 0.7
@@ -13,7 +13,7 @@ def test_edges_are_undirected():
 
 def test_layers_are_separate_edges_between_the_same_pair():
     world = make_world()
-    a, b = add_agent(world, Occupation.FARMER), add_agent(world, Occupation.MINER)
+    a, b = add_agent(world, "farmer"), add_agent(world, "miner")
     world.add_edge(a.id, b.id, Layer.SOCIAL)
     world.add_edge(a.id, b.id, Layer.TRADE)
 
@@ -25,7 +25,7 @@ def test_layers_are_separate_edges_between_the_same_pair():
 
 def test_removing_a_node_removes_its_edges():
     world = make_world()
-    a, b = add_agent(world, Occupation.FARMER), add_agent(world, Occupation.MINER)
+    a, b = add_agent(world, "farmer"), add_agent(world, "miner")
     world.add_edge(a.id, b.id, Layer.SOCIAL)
 
     world.remove_node(a.id)

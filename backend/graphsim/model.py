@@ -21,17 +21,6 @@ class Layer(StrEnum):
     ACCESS = "access"
 
 
-class Occupation(StrEnum):
-    FARMER = "farmer"
-    MINER = "miner"
-    MERCHANT = "merchant"
-
-
-class SiteKind(StrEnum):
-    FARM = "farm"
-    MINE = "mine"
-
-
 # --- Nodes -----------------------------------------------------------------------------------
 
 
@@ -39,13 +28,12 @@ class SiteKind(StrEnum):
 class Agent:
     id: str
     name: str
-    occupation: Occupation
+    occupation: str  # a key of cfg.occupations
     home: str  # town id
-    food: float
-    ore: float
+    inventory: dict[str, float]  # good -> amount held, for every good in cfg.goods
     coin: float
     hunger_ticks: int = 0
-    need: str = ""  # most pressing need this tick: "food", "ore" or ""
+    need: str = ""  # the most pressing good to buy this tick, or ""
     arrived: int = 0  # tick the agent entered the world
 
 
@@ -53,14 +41,14 @@ class Agent:
 class Town:
     id: str
     name: str
-    founding_mix: dict[Occupation, int]  # how many of each occupation the town started with
+    founding_mix: dict[str, int]  # occupation -> how many the town started with
 
 
 @dataclass
 class Site:
     id: str
     name: str
-    kind: SiteKind
+    kind: str  # a key of cfg.site_kinds
     stock: float
     capacity: float
     regen: float  # stock regained per tick (before drought effects)
@@ -108,7 +96,7 @@ class Interaction:
 
     buyer: str
     seller: str
-    good: str  # "food" or "ore"
+    good: str  # a key of cfg.goods
     amount: float
     outcome: str  # "success", "gift", "refused", "no_surplus" or "cannot_afford"
     cause: str  # human-readable explanation

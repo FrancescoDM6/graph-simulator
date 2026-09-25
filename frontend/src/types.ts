@@ -4,7 +4,7 @@
 export type Layer = "social" | "trade" | "membership" | "access";
 export const LAYERS: Layer[] = ["social", "trade", "membership", "access"];
 
-export type Occupation = "farmer" | "miner" | "merchant";
+export type Occupation = string; // keys of [occupations] in scenario.toml
 
 export interface AgentNode {
   id: string;
@@ -12,8 +12,7 @@ export interface AgentNode {
   name: string;
   occupation: Occupation;
   home: string;
-  food: number;
-  ore: number;
+  inventory: Record<string, number>; // good -> amount held
   coin: number;
   hunger_ticks: number;
   need: string;
@@ -70,32 +69,9 @@ export interface SimEvent {
   cause: string;
 }
 
-export interface TickMetrics {
-  tick: number;
-  population: number;
-  farmers: number;
-  miners: number;
-  merchants: number;
-  total_food: number;
-  total_coin: number;
-  price_food: number;
-  price_ore: number;
-  gini_coin: number;
-  social_density: number;
-  social_components: number;
-  social_clustering: number;
-  communities: number;
-  avg_trust: number;
-  trades: number;
-  failed_trades: number;
-  gifts: number;
-  starving: number;
-  orgs: number;
-  drought: boolean;
-  top_broker: string;
-  top_broker_betweenness: number;
-  merchant_broker_share: number;
-}
+// Metric name -> value, e.g. "gini_coin", "population.farmer", "stock.food", "price.ore".
+// Names come from backend/graphsim/metrics.py (_tick_metrics).
+export type TickMetrics = Record<string, number>;
 
 export interface Snapshot {
   tick: number;
@@ -105,6 +81,7 @@ export interface Snapshot {
   nodes: GraphNode[];
   edges: GraphEdge[];
   metrics: TickMetrics | null;
+  top_broker: string;
   events: SimEvent[]; // events from this tick only
   running: boolean;
   ticks_per_second: number;

@@ -81,7 +81,12 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
       rows.push(
         ["Occupation", `${node.occupation} in ${name(node.home)}`],
         ["Coin", node.coin.toFixed(1)],
-        ["Food / ore", `${node.food.toFixed(1)} / ${node.ore.toFixed(1)}`],
+        [
+          "Holding",
+          Object.entries(node.inventory)
+            .map(([good, amount]) => `${amount.toFixed(1)} ${good}`)
+            .join(" · "),
+        ],
         ["Needs", node.need || "nothing"],
         ["Hungry for", node.hunger_ticks ? `${node.hunger_ticks} ticks` : "—"],
         ["Organization", node.org ? name(node.org) : "—"],

@@ -9,11 +9,8 @@ from statistics import mean
 import networkx as nx
 
 from graphsim.events import Event
-from graphsim.model import Layer, Occupation, World
+from graphsim.model import Layer, World
 from graphsim.stats import NodeStats, TickMetrics
-
-BROKER_OVERTAKE_MARGIN = 1.1  # a new top broker must beat the old one by 10%
-MIN_BROKER_BETWEENNESS = 0.1  # below this nobody counts as a broker
 
 
 def record_tick(world: World) -> None:
@@ -37,8 +34,9 @@ def record_tick(world: World) -> None:
     )
     history = world.metrics.history
     if history:
-        _detect_component_change(world, history[-1].social_components, metrics.social_components)
-        _detect_inequality_jump(world, metrics.gini_coin)
+        before, after = history[-1]["social_components"], metrics["social_components"]
+        _detect_component_change(world, int(before), int(after))
+        _detect_inequality_jump(world, metrics["gini_coin"])
     history.append(metrics)
 
 
@@ -70,49 +68,53 @@ def _agent_graph(world: World, layer: Layer) -> nx.Graph:
 def _tick_metrics(
     world: World, social: nx.Graph, betweenness: dict[str, float], community_count: int
 ) -> TickMetrics:
+    """Every per-tick metric, by name. The names are what [viewer.timeline] and analysis.py use."""
+    cfg = world.cfg
     agents = list(world.agents.values())
     social_ties = [e for e in world.edges.values() if e.layer == Layer.SOCIAL]
     outcomes = [i.outcome for i in world.interactions]
+    brokers = [a for a in agents if cfg.is_broker(a.occupation)]
     total_betweenness = sum(betweenness.values())
-    merchant_betweenness = sum(
-        b for a, b in betweenness.items() if world.agents[a].occupation == Occupation.MERCHANT
-    )
+    broker_betweenness = sum(betweenness.get(a.id, 0.0) for a in brokers)
     top = world.metrics.top_broker
-    return TickMetrics(
-        tick=world.tick,
-        population=len(agents),
-        farmers=sum(a.occupation == Occupation.FARMER for a in agents),
-        miners=sum(a.occupation == Occupation.MINER for a in agents),
-        merchants=sum(a.occupation == Occupation.MERCHANT for a in agents),
-        total_food=round(sum(a.food for a in agents), 2),
-        total_coin=round(sum(a.coin for a in agents), 2),
-        price_food=round(world.prices["food"], 3),
-        price_ore=round(world.prices["ore"], 3),
-        gini_coin=round(gini([a.coin for a in agents]), 4),
-        social_density=round(nx.density(social), 4),
-        social_components=_count_components(world, social),
-        social_clustering=round(nx.average_clustering(social), 4),
-        communities=community_count,
-        avg_trust=round(mean(e.trust for e in social_ties), 4) if social_ties else 0.0,
-        trades=outcomes.count("success"),
-        failed_trades=len(outcomes) - outcomes.count("success") - outcomes.count("gift"),
-        gifts=outcomes.count("gift"),
-        starving=sum(a.hunger_ticks > 0 for a in agents),
-        orgs=len(world.orgs),
-        drought=world.drought,
-        top_broker=top,
-        top_broker_betweenness=round(betweenness.get(top, 0.0), 4),
-        merchant_broker_share=(
-            round(merchant_betweenness / total_betweenness, 4) if total_betweenness else 0.0
-        ),
+
+    metrics: TickMetrics = {"tick": world.tick, "population": len(agents)}
+    for occupation in cfg.occupations:
+        metrics[f"population.{occupation}"] = sum(a.occupation == occupation for a in agents)
+    for good in cfg.goods:
+        metrics[f"stock.{good}"] = round(sum(a.inventory[good] for a in agents), 2)
+        metrics[f"price.{good}"] = round(world.prices[good], 3)
+    metrics.update(
+        {
+            "coin_total": round(sum(a.coin for a in agents), 2),
+            "gini_coin": round(gini([a.coin for a in agents]), 4),
+            "social_density": round(nx.density(social), 4),
+            "social_components": _count_components(world, social),
+            "social_clustering": round(nx.average_clustering(social), 4),
+            "communities": community_count,
+            "avg_trust": round(mean(e.trust for e in social_ties), 4) if social_ties else 0.0,
+            "trades": outcomes.count("success"),
+            "failed_trades": len(outcomes) - outcomes.count("success") - outcomes.count("gift"),
+            "gifts": outcomes.count("gift"),
+            "refusals": outcomes.count("refused"),
+            "starving": sum(a.hunger_ticks > 0 for a in agents),
+            "orgs": len(world.orgs),
+            "drought": 1 if world.drought else 0,
+            "top_broker_betweenness": round(betweenness.get(top, 0.0), 4),
+            "broker_share": (
+                round(broker_betweenness / total_betweenness, 4) if total_betweenness else 0.0
+            ),
+            "broker_population_share": round(len(brokers) / len(agents), 4) if agents else 0.0,
+        }
     )
+    return metrics
 
 
 def _count_components(world: World, social: nx.Graph) -> int:
     return sum(
         1
         for component in nx.connected_components(social)
-        if len(component) >= world.cfg.min_component_size
+        if len(component) >= world.cfg.metrics.min_component_size
     )
 
 
@@ -126,7 +128,7 @@ def _update_communities(world: World, social: nx.Graph) -> dict[str, int]:
     the previous community it overlaps most (Jaccard >= community_match_jaccard). Unmatched
     communities get a fresh label ("formed"); unmatched old labels are "dissolved".
     """
-    cfg = world.cfg
+    cfg = world.cfg.metrics
     state = world.metrics
     found = [c for c in _louvain(social) if len(c) >= cfg.min_community_size]
     found.sort(key=lambda c: (-len(c), min(c)))  # biggest first, deterministic
@@ -204,9 +206,10 @@ def _update_top_broker(world: World, betweenness: dict[str, float], trade: nx.Gr
         return
     leader = max(sorted(betweenness), key=lambda a: betweenness[a])
     current = state.top_broker if state.top_broker in world.agents else ""
-    if leader == current or betweenness[leader] < MIN_BROKER_BETWEENNESS:
+    cfg = world.cfg.metrics
+    if leader == current or betweenness[leader] < cfg.min_broker_betweenness:
         return
-    if current and betweenness[leader] < BROKER_OVERTAKE_MARGIN * betweenness.get(current, 0.0):
+    if current and betweenness[leader] < cfg.broker_overtake_margin * betweenness.get(current, 0.0):
         return
     state.top_broker = leader
     world.log.add(
@@ -246,13 +249,13 @@ def _events_this_tick(world: World) -> list[Event]:
 
 
 def _detect_inequality_jump(world: World, gini_now: float) -> None:
-    cfg = world.cfg
+    cfg = world.cfg.metrics
     history = world.metrics.history
     if len(history) < cfg.gini_window:
         return
     if world.tick - world.metrics.last_inequality_event < cfg.gini_window:
         return
-    gini_before = history[-cfg.gini_window].gini_coin
+    gini_before = history[-cfg.gini_window]["gini_coin"]
     if gini_now - gini_before < cfg.gini_jump:
         return
     world.metrics.last_inequality_event = world.tick
