@@ -287,6 +287,9 @@ variants = [
   "no_organizations", "no_droughts", "static_social", "random_partners",
 ]
 sweep = {}
+branch_at = 0
+controls = []
+arms = {}
 
 [experiments.topologies]
 description = "Which phenomena depend on the shape of the world? Six worlds with the same people and resources (merchant_economy: twice the merchants)."
@@ -299,6 +302,9 @@ scenarios = [
 ]
 variants = ["baseline"]
 sweep = {}
+branch_at = 0
+controls = []
+arms = {}
 
 [experiments.bridges]
 description = "When do two regions split apart, and do brokers gather on the bridges? Merchants either live at the bridges (so they move as bridges are added) or in every town (so only the roads change)."
@@ -308,6 +314,9 @@ level = "summary"
 scenarios = ["two_regions"]
 variants = ["baseline"]
 sweep = { "generator.bridges" = [1, 2, 3, 4], "generator.merchants" = ["bridge_towns", "every_town"] }
+branch_at = 0
+controls = []
+arms = {}
 
 [experiments.commission_sweep]
 description = "How broker power depends on the commission."
@@ -317,7 +326,51 @@ level = "summary"
 scenarios = ["three_towns"]
 variants = ["baseline"]
 sweep = { "trade.broker_commission" = [0.1, 0.3, 0.5, 0.8] }
+branch_at = 0
+controls = []
+arms = {}
 
+
+# Interventions: every run is branched at `branch_at`, once per control and arm. Each arm is
+# compared, seed by seed, with its "none" branch; "reseed" shows how far chance alone moves the
+# same measures (see interventions.py for kinds and targets).
+
+[experiments.remove_broker]
+description = "Remove the top broker at tick 1000: does someone take their place, and does inequality come back?"
+seeds = "1-50"
+ticks = 2000
+level = "summary"
+scenarios = ["three_towns", "hub_and_spokes"]
+variants = ["baseline"]
+sweep = {}
+branch_at = 1000
+controls = ["none", "reseed"]
+arms = { remove_top_broker = [{ kind = "remove_agent", target = "top_broker" }] }
+
+[experiments.late_bridge]
+description = "Build a second bridge between two regions at tick 1000: does it end up like a world that always had two?"
+seeds = "1-50"
+ticks = 2000
+level = "summary"
+scenarios = ["two_regions"]
+variants = ["baseline"]
+# Merchants in every town, so the bridges are the only difference between the two maps.
+sweep = { "generator.bridges" = [1, 2], "generator.merchants" = ["every_town"] }
+branch_at = 1000
+controls = ["none", "reseed"]
+arms = { second_bridge = [{ kind = "add_road", between = ["town:Ashby", "town:Dunmere"] }] }
+
+[experiments.drought_relief]
+description = "Give 10 food to everyone starving 20 ticks into the drought at tick 1000: does one-off relief change anything lasting?"
+seeds = "1-50"
+ticks = 2000
+level = "summary"
+scenarios = ["three_towns"]
+variants = ["baseline"]
+sweep = {}
+branch_at = 1020
+controls = ["none", "reseed"]
+arms = { food_relief = [{ kind = "give", target = "starving", asset = "food", amount = 10 }] }
 
 # =============================================================================================
 # PHENOMENA: when does a run "show" a phenomenon? `measure` names a run-level measure defined

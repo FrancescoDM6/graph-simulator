@@ -281,6 +281,12 @@ class ExperimentSpec:
     scenarios: list[str]
     variants: list[str]
     sweep: dict[str, list[Any]]
+    # Interventions: 0 = none. Otherwise every run above is branched at this tick, once per
+    # control ("none": unchanged; "reseed": a fresh random stream, to measure chance) and once
+    # per arm (a name and the interventions it applies at that tick).
+    branch_at: int
+    controls: list[str]
+    arms: dict[str, list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -400,6 +406,7 @@ class Scenario:
                     )  # e.g. a variant naming another map's towns
             if experiment.level not in self.recording:
                 raise ScenarioError(f"experiments.{name}.level: no [recording.{experiment.level}]")
+            _check_branching(name, experiment)
 
     def config(
         self,
@@ -615,6 +622,36 @@ def _require(raw: dict[str, Any], *keys: str) -> Any:
 
 def _with_seed_list(spec: dict[str, Any]) -> dict[str, Any]:
     return {**spec, "seeds": parse_seeds(spec.get("seeds", []))}
+
+
+def _check_branching(name: str, experiment: ExperimentSpec) -> None:
+    """An experiment's interventions must make sense before anything runs."""
+    from graphsim import interventions  # (it imports this module)
+
+    where = f"experiments.{name}"
+    if not experiment.branch_at:
+        if experiment.controls or experiment.arms:
+            raise ScenarioError(f"{where}: controls and arms need a branch_at tick")
+        return
+    if not 1 <= experiment.branch_at < experiment.ticks:
+        raise ScenarioError(f"{where}.branch_at: must be between 1 and ticks - 1")
+    for control in experiment.controls:
+        if control not in CONTROLS:
+            raise ScenarioError(f"{where}.controls: {control!r} is not one of {list(CONTROLS)}")
+    if "none" not in experiment.controls:
+        raise ScenarioError(f'{where}.controls: needs "none" (what every arm is compared with)')
+    for arm, changes in experiment.arms.items():
+        if arm in CONTROLS or ":" in arm:
+            raise ScenarioError(f"{where}.arms: {arm!r} can't be a control's name or contain ':'")
+        for change in changes:
+            try:
+                interventions.validate({**change, "tick": experiment.branch_at})
+            except interventions.InterventionError as error:
+                raise ScenarioError(f"{where}.arms.{arm}: {error}") from error
+
+
+# The controls a branching experiment can include, and the interventions each applies.
+CONTROLS: dict[str, list[dict[str, Any]]] = {"none": [], "reseed": [{"kind": "reseed"}]}
 
 
 def _check_references(cfg: SimConfig) -> None:

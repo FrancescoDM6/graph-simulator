@@ -98,3 +98,17 @@ def test_a_new_good_site_and_occupation_need_no_code():
     assert cfg.producers_of("wood") == ["woodcutter"]
     assert world.metrics.history[-1]["stock.wood"] > 0
     assert world.metrics.history[-1]["population.woodcutter"] == 3
+
+
+def test_an_experiments_interventions_are_checked_when_loading():
+    def bad_arm(raw):
+        raw["experiments"]["remove_broker"]["arms"] = {"oops": [{"kind": "teleport"}]}
+
+    with pytest.raises(ScenarioError, match="arms.oops: unknown intervention kind"):
+        scenario_with(bad_arm)
+
+    def no_none(raw):
+        raw["experiments"]["remove_broker"]["controls"] = ["reseed"]
+
+    with pytest.raises(ScenarioError, match='needs "none"'):
+        scenario_with(no_none)

@@ -65,14 +65,14 @@ def build(conn, scenario: Scenario, experiment: str) -> dict[str, Any]:
                 "p5": low, "p95": high,
             })  # fmt: skip
 
-    paired = []
+    diffs: dict[tuple[str, str], list[float]] = {}  # (label, measure) -> differences by seed
     for label in labels:
         baseline_label = baselines[label]
         if label == baseline_label:
             continue
         base = {r["seed"]: r for r in runs if r["label"] == baseline_label}
         for measure in measure_names:
-            diffs = [
+            diffs[(label, measure)] = [
                 r["measures"][measure] - base[r["seed"]]["measures"][measure]
                 for r in runs
                 if r["label"] == label
@@ -80,9 +80,21 @@ def build(conn, scenario: Scenario, experiment: str) -> dict[str, Any]:
                 and measure in r["measures"]
                 and measure in base[r["seed"]]["measures"]
             ]
-            paired.append(
-                {"label": label, "baseline": baseline_label, "measure": measure, **_paired(diffs)}
-            )
+
+    paired = []
+    for (label, measure), values in diffs.items():
+        row = {"label": label, "baseline": baselines[label], "measure": measure, **_paired(values)}
+        # How far chance alone moves this measure (the "reseed" control of the same run), and
+        # how often this arm moved it further than that.
+        chance = diffs.get((f"{world_of[label]}:reseed", measure))
+        noise = median(abs(d) for d in chance) if chance and not label.endswith(":reseed") else None
+        row["noise"] = noise
+        row["beyond_chance"] = (
+            sum(abs(d) > noise for d in values) / len(values)
+            if noise is not None and values
+            else None
+        )
+        paired.append(row)
 
     return {
         "experiment": experiment,
@@ -102,12 +114,15 @@ def reanalyze(conn, run_ids: list[int]) -> None:
     computed while they ran. The drought ratios suffer most (about 20% low): droughts start on
     multiples of 200, so the samples always include a drought's first, not-yet-hungry tick."""
     for run_id in run_ids:
-        row = conn.execute("select ticks, config_json from runs where id = ?", (run_id,)).fetchone()
+        row = conn.execute(
+            "select ticks, config_json, branch_tick from runs where id = ?", (run_id,)
+        ).fetchone()
         min_lifespan = json.loads(row["config_json"])["metrics"]["community_min_lifespan"]
         data = analysis.RunData(
             series=storage.metric_series(conn, run_id),
             communities=storage.communities(conn, run_id),
-            event_counts=storage.event_counts(conn, run_id),
+            event_counts=storage.event_counts(conn, run_id, since_tick=row["branch_tick"] or 0),
+            branch_tick=row["branch_tick"],
             ticks=row["ticks"],
             min_lifespan=min_lifespan,
         )
@@ -164,6 +179,8 @@ def format_text(result: dict[str, Any], scenario: Scenario) -> str:
                 if pair and pair["n"]
                 else "n/a"
             )
+            if pair and pair.get("beyond_chance") is not None:
+                pair_text += f", beyond chance in {pair['beyond_chance']:.0%}"
             lines.append(
                 f"  {label:<{width}} {hits:>5}/{presence['n']:<3} ({presence['mean']:4.0%})"
                 f" {ci:>13}  {stats['median']:8.3f} {spread:>18}  {pair_text:>28}"
@@ -230,7 +247,11 @@ def _paired(diffs: list[float]) -> dict[str, Any]:
 
 
 def _world(run: dict[str, Any]) -> str:
-    """Which map a run was made on: its scenario plus any generator parameters it set."""
+    """Which runs are paired with each other: in an experiment that intervenes, the arms of one
+    run ("<label>:<arm>"); otherwise, runs on one map: a scenario plus its generator
+    parameters."""
+    if ":" in run["label"]:
+        return run["label"].rsplit(":", 1)[0]
     params = sorted(
         (k, v) for k, v in run.get("overrides", {}).items() if k.startswith("generator.")
     )
@@ -238,8 +259,12 @@ def _world(run: dict[str, Any]) -> str:
 
 
 def _baseline_label(labels: list[str]) -> str | None:
-    """Among one world's labels: its unswept baseline ("baseline" or "<world>/baseline") if
-    present, otherwise the first label (e.g. in a pure sweep)."""
+    """Among one world's labels: its "none" branch (in an experiment that intervenes), else its
+    unswept baseline ("baseline" or "<world>/baseline"), else the first label (e.g. in a pure
+    sweep)."""
+    for label in labels:
+        if label.endswith(":none"):
+            return label
     for label in labels:
         if label.split("/")[-1] == BASELINE:
             return label

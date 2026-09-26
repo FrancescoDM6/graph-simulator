@@ -116,6 +116,9 @@ def two_worlds(scenario, sweep=None) -> str:
         scenarios=["three_towns", "hub_and_spokes"],
         variants=["baseline", "no_gifting"],
         sweep=sweep or {},
+        branch_at=0,
+        controls=[],
+        arms={},
     )
     return "worlds"
 
@@ -157,6 +160,9 @@ def test_generator_parameters_can_be_swept(scenario):
         scenarios=["two_regions"],
         variants=["baseline"],
         sweep={"generator.bridges": [1, 3]},
+        branch_at=0,
+        controls=[],
+        arms={},
     )
     experiment.run_experiment(scenario, "bridges", workers=1)
     conn = storage.connect(scenario.database)
@@ -173,3 +179,32 @@ def test_generator_parameters_can_be_swept(scenario):
     )
     experiment.run_experiment(scenario, "bridges", workers=1)
     assert report.build(conn, scenario, "bridges")["labels"] == ["baseline[generator.bridges=3]"]
+
+
+def test_an_experiment_that_intervenes(scenario):
+    scenario.experiments["shock"] = ExperimentSpec(
+        description="test",
+        seeds=[1, 2, 3],
+        ticks=80,
+        level="summary",
+        scenarios=["three_towns"],
+        variants=["baseline"],
+        sweep={},
+        branch_at=40,
+        controls=["none", "reseed"],
+        arms={"remove_broker": [{"kind": "remove_agent", "target": "top_broker"}]},
+    )
+    experiment.run_experiment(scenario, "shock", workers=2)
+    conn = storage.connect(scenario.database)
+    result = report.build(conn, scenario, "shock")
+    assert set(result["labels"]) == {"baseline:none", "baseline:reseed", "baseline:remove_broker"}
+    rows = {(p["label"], p["measure"]): p for p in result["paired"]}
+    row = rows[("baseline:remove_broker", "departures_per_1000")]
+    assert row["baseline"] == "baseline:none" and row["n"] == 3
+    assert row["noise"] is not None and row["beyond_chance"] is not None
+    assert rows[("baseline:reseed", "departures_per_1000")]["noise"] is None
+    # Every arm is a branch of the same unintervened run of its seed.
+    arms = [a for a in storage.experiment_runs(conn, "shock") if a["seed"] == 1]
+    parents = {storage.get_run(conn, a["run_id"])["parent_run"] for a in arms}
+    assert len(parents) == 1 and None not in parents
+    assert "beyond chance" in report.format_text(result, scenario)
