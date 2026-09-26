@@ -8,14 +8,17 @@ export const COMMUNITY_COLORS = [
   "#4e79a7", "#e15759", "#76b7b2", "#59a14f", "#edc948",
   "#b07aa1", "#ff9da7", "#9c755f", "#f28e2b", "#bab0ac",
 ];
-const NO_COMMUNITY_COLOR = "#5b606b";
+const NO_COMMUNITY_COLOR = "#4b5260";
 const UNKNOWN_OCCUPATION_COLOR = "#999999";
-export const STARVING_COLOR = "#ff4d4d";
+export const STARVING_COLOR = "#f06a6a";
+const MEMBERSHIP_COLOR = "#b58df2";
+const LABEL_COLOR = "#a3a9b5"; // --text-2 in styles.css
+const CANVAS_COLOR = "#0b0d10"; // --bg-0: label outlines blend into the background
 
 export const LAYER_COLORS: Record<Layer, string> = {
   social: "#6ea8fe",
   trade: "#f0a04b",
-  membership: "#b58df2",
+  membership: MEMBERSHIP_COLOR,
   access: "#6b7280",
 };
 
@@ -107,7 +110,7 @@ export function nodeData(node: GraphNode, coloring: Coloring): Record<string, st
         id: node.id,
         kind: node.kind,
         label: node.name,
-        size: Math.min(60, 14 + 4 * Math.sqrt(Math.max(node.coin, 0))), // size = wealth
+        size: Math.min(46, 12 + 3.2 * Math.sqrt(Math.max(node.coin, 0))), // size = wealth
         fill: agentFill(node, coloring),
         border:
           node.hunger_ticks > 0
@@ -116,42 +119,43 @@ export function nodeData(node: GraphNode, coloring: Coloring): Record<string, st
         community: node.community,
       };
     case "town":
-      return { id: node.id, kind: node.kind, label: node.name, size: 46, fill: "#343944", border: "#8a90a0" };
+      return { id: node.id, kind: node.kind, label: node.name, size: 40, fill: "#161a20", border: "#4b5563" };
     case "site":
       return {
         id: node.id,
         kind: node.kind,
         label: node.name,
-        size: 26,
-        fill: "#48505e",
-        border: node.stock < node.capacity * 0.1 ? STARVING_COLOR : "#8a90a0", // red = depleted
+        size: 18,
+        fill: "#1f242c",
+        border: node.stock < node.capacity * 0.1 ? STARVING_COLOR : "#4b5563", // red = depleted
       };
     case "org":
       return {
         id: node.id,
         kind: node.kind,
         label: node.name,
-        size: 16 + 3 * node.members,
-        fill: "#5a3f8a",
-        border: LAYER_COLORS.membership,
+        size: Math.min(44, 18 + 2 * node.members),
+        fill: MEMBERSHIP_COLOR,
+        border: MEMBERSHIP_COLOR,
       };
   }
 }
 
 export function edgeData(edge: GraphEdge, tick: number): Record<string, string | number> {
+  // Idle ties nearly disappear, so the picture shows what is happening now, not every tie ever.
   let width = 1;
-  let opacity = 0.35;
+  let opacity = 0.3;
   if (edge.layer === "social") {
-    width = 1 + 4 * edge.strength;
-    opacity = 0.15 + 0.6 * edge.strength;
+    width = 0.8 + 3 * edge.strength;
+    opacity = 0.08 + 0.47 * edge.strength;
   } else if (edge.layer === "trade") {
     const recency = Math.max(0, 1 - (tick - edge.last_active) / RECENT_TRADE_TICKS);
-    width = 1 + 5 * edge.strength;
-    opacity = 0.15 + 0.75 * recency;
+    width = 1 + 3 * edge.strength;
+    opacity = 0.04 + 0.76 * recency;
   } else if (edge.layer === "membership") {
-    opacity = 0.5;
+    opacity = 0.35;
   } else {
-    opacity = 0.25;
+    opacity = 0.15;
   }
   return {
     id: edge.id,
@@ -165,6 +169,14 @@ export function edgeData(edge: GraphEdge, tick: number): Record<string, string |
   };
 }
 
+// --- Labels ------------------------------------------------------------------------------------
+// Which names are readable. Every name at every zoom turns the graph into a wall of text, so
+// agents', sites' and organizations' names appear only once zoomed in far enough that they'd be
+// drawn at least this big on screen; hovering or selecting a node shows its name (and its
+// neighbours') at any zoom. Towns are the landmarks: their names always show.
+const LABEL_FONT_SIZE = 10;
+const LABEL_MIN_SCREEN_SIZE = 9; // hide names drawn smaller than this (px), i.e. zoom < 0.9
+
 export const stylesheet: cytoscape.StylesheetJson = [
   {
     selector: "node",
@@ -173,23 +185,46 @@ export const stylesheet: cytoscape.StylesheetJson = [
       height: "data(size)",
       "background-color": "data(fill)",
       "border-color": "data(border)",
-      "border-width": 3,
+      "border-width": 2,
+      // A soft glow in the node's own colour.
+      "underlay-color": "data(fill)",
+      "underlay-opacity": 0.18,
+      "underlay-padding": 5,
+      "underlay-shape": "ellipse",
       label: "data(label)",
-      color: "#d7dae0",
-      "font-size": 9,
+      color: LABEL_COLOR,
+      "font-size": LABEL_FONT_SIZE,
+      "min-zoomed-font-size": LABEL_MIN_SCREEN_SIZE,
       "text-valign": "bottom",
-      "text-margin-y": 3,
-      "text-outline-color": "#14161a",
+      "text-margin-y": 4,
+      "text-outline-color": CANVAS_COLOR,
       "text-outline-width": 2,
+      "overlay-opacity": 0,
       // Only sizes animate: colours change instantly, so an exported figure never catches a
       // colour half-way through a transition.
       "transition-property": "width, height",
       "transition-duration": 300,
     },
   },
-  { selector: 'node[kind = "town"]', style: { shape: "round-rectangle", "font-size": 12, "font-weight": "bold" } },
-  { selector: 'node[kind = "site"]', style: { shape: "diamond", "border-width": 2 } },
-  { selector: 'node[kind = "org"]', style: { shape: "hexagon", "font-style": "italic" } },
+  {
+    selector: 'node[kind = "town"]',
+    style: {
+      shape: "round-rectangle",
+      "border-width": 1.5,
+      "underlay-opacity": 0,
+      color: "#e6e8ec",
+      "font-size": 12,
+      "font-weight": "bold",
+      "min-zoomed-font-size": 0,
+    },
+  },
+  { selector: 'node[kind = "site"]', style: { shape: "diamond", "border-width": 1.5, "underlay-opacity": 0 } },
+  {
+    selector: 'node[kind = "org"]',
+    style: { shape: "hexagon", "background-opacity": 0.22, "border-width": 1.5, "underlay-opacity": 0, "font-style": "italic" },
+  },
+  // Agents who can't eat glow red.
+  { selector: `node[border = "${STARVING_COLOR}"]`, style: { "underlay-color": STARVING_COLOR, "underlay-opacity": 0.35 } },
   {
     selector: "edge",
     style: {
@@ -201,22 +236,32 @@ export const stylesheet: cytoscape.StylesheetJson = [
       "transition-duration": 300,
     },
   },
-  { selector: 'edge[layer = "access"]', style: { "line-style": "dashed" } },
+  { selector: 'edge[layer = "membership"]', style: { "line-style": "dashed", "line-dash-pattern": [4, 4] } },
+  { selector: 'edge[layer = "access"]', style: { "line-style": "dotted" } },
   { selector: ".hidden", style: { visibility: "hidden", events: "no" } },
   { selector: ".ego-hidden", style: { display: "none" } }, // outside the ego neighbourhood
-  // Event pulses (see PULSE_KINDS): briefly added when something happens to an element.
-  { selector: "node.pulse-trade", style: { "overlay-color": "#ffd166", "overlay-opacity": 0.35, "overlay-padding": 6 } },
-  { selector: "edge.pulse-trade", style: { "line-color": "#ffd166", opacity: 1, width: 6 } },
-  { selector: ".pulse-gift", style: { "overlay-color": "#7bd88f", "overlay-opacity": 0.5, "overlay-padding": 10 } },
-  { selector: ".pulse-starving", style: { "overlay-color": STARVING_COLOR, "overlay-opacity": 0.5, "overlay-padding": 10 } },
-  { selector: ".pulse-population", style: { "overlay-color": "#ffffff", "overlay-opacity": 0.35, "overlay-padding": 12 } },
-  { selector: ".pulse-org", style: { "overlay-color": LAYER_COLORS.membership, "overlay-opacity": 0.5, "overlay-padding": 10 } },
-  { selector: "edge.pulse-trust-up", style: { "line-color": "#7bd88f", opacity: 1, width: 6 } },
-  { selector: "edge.pulse-trust-down", style: { "line-color": STARVING_COLOR, opacity: 1, width: 6 } },
-  { selector: ".faded", style: { opacity: 0.12 } },
+  // Event pulses (see PULSE_KINDS): a brief glow on the elements an event involved.
+  { selector: "node.pulse-trade", style: { "underlay-color": "#ffd166", "underlay-opacity": 0.55, "underlay-padding": 9 } },
+  { selector: "edge.pulse-trade", style: { "line-color": "#ffd166", opacity: 1, width: 4 } },
+  { selector: ".pulse-gift", style: { "underlay-color": "#6fcf8e", "underlay-opacity": 0.6, "underlay-padding": 12 } },
+  { selector: ".pulse-starving", style: { "underlay-color": STARVING_COLOR, "underlay-opacity": 0.65, "underlay-padding": 12 } },
+  { selector: ".pulse-population", style: { "underlay-color": "#ffffff", "underlay-opacity": 0.4, "underlay-padding": 12 } },
+  { selector: ".pulse-org", style: { "underlay-color": MEMBERSHIP_COLOR, "underlay-opacity": 0.6, "underlay-padding": 12 } },
+  { selector: "edge.pulse-trust-up", style: { "line-color": "#6fcf8e", opacity: 1, width: 4 } },
+  { selector: "edge.pulse-trust-down", style: { "line-color": STARVING_COLOR, opacity: 1, width: 4 } },
+  { selector: ".faded", style: { opacity: 0.1 } }, // not part of the selection or highlighted group
+  { selector: ".dim", style: { opacity: 0.15 } }, // not next to the hovered node
+  { selector: "node.show-label", style: { "min-zoomed-font-size": 0, color: "#e6e8ec" } },
   {
     selector: "node:selected",
-    style: { "border-width": 5, "border-color": "#ffffff", "overlay-opacity": 0 },
+    style: {
+      "border-width": 3,
+      "border-color": "#ffffff",
+      "underlay-opacity": 0.35,
+      "min-zoomed-font-size": 0,
+      color: "#ffffff",
+      "font-weight": "bold",
+    },
   },
 ];
 

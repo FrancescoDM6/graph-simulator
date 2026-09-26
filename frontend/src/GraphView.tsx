@@ -13,6 +13,7 @@ import {
   numericValue,
   stylesheet,
 } from "./graphStyle";
+import { FitIcon, MinusIcon, PlusIcon } from "./icons";
 import type { AgentNode, GraphNode, Layer, SimEvent, Snapshot } from "./types";
 
 cytoscape.use(fcose);
@@ -25,9 +26,11 @@ const NEW_NODE_JITTER = 40; // new nodes appear next to a neighbour, offset by u
 const TOWN_RING_RADIUS = 320; // towns start evenly spaced on a circle this big
 const PULSE_MS = 650; // how long an event highlight stays on
 const HULL_PADDING = 12; // space between a community's nodes and its outline
+const FIT_PADDING = 36; // space between the graph and the edge of its panel
+const ZOOM_STEP = 1.3; // the + and − buttons zoom by this factor
 
 // How long each kind of edge "wants" to be. Shorter = pulls its nodes closer together.
-const IDEAL_EDGE_LENGTH: Record<Layer, number> = { social: 70, trade: 90, membership: 60, access: 130 };
+const IDEAL_EDGE_LENGTH: Record<Layer, number> = { social: 80, trade: 110, membership: 70, access: 150 };
 
 export interface GraphExport {
   /** An SVG of the graph (whole graph, or the current view in ego mode) with outlines drawn in. */
@@ -74,8 +77,22 @@ export function GraphView(props: Props) {
     cy.on("tap", (event) => {
       if (event.target === cy) onSelectRef.current(null);
     });
+    // Hovering a node names it and its neighbours, and (when nothing is selected) dims the rest.
+    cy.on("mouseover", "node", (event) => {
+      const neighbourhood = event.target.closedNeighborhood();
+      neighbourhood.nodes().addClass("show-label");
+      if (cy.$(":selected").empty()) cy.elements().difference(neighbourhood).addClass("dim");
+    });
+    cy.on("mouseout", "node", () => cy.elements().removeClass("dim show-label"));
     cyRef.current = cy;
+    // When the panel changes size (compare mode, side panel shown or hidden), fit the graph again.
+    const resized = new ResizeObserver(() => {
+      cy.resize();
+      if (cy.nodes().nonempty()) cy.fit(cy.elements(":visible"), FIT_PADDING);
+    });
+    resized.observe(containerRef.current!);
     return () => {
+      resized.disconnect();
       window.clearTimeout(pendingLayout.current);
       cy.destroy();
     };
@@ -137,7 +154,7 @@ export function GraphView(props: Props) {
           const p = saved.get(n.id());
           if (p) n.position(p);
         });
-        cy.fit(undefined, 40);
+        cy.fit(undefined, FIT_PADDING);
       }
       return;
     }
@@ -167,7 +184,7 @@ export function GraphView(props: Props) {
         animate: true,
         animationDuration: 400,
         fit: true,
-        padding: 40,
+        padding: FIT_PADDING,
       } as cytoscape.LayoutOptions)
       .run();
   }
@@ -251,9 +268,30 @@ export function GraphView(props: Props) {
     svg: ({ background }) => exportSvg(cyRef.current!, background, showHulls, ego !== null),
   }));
 
+  const zoomBy = (factor: number) => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+  };
+
   return (
     <>
       <div className="graph" ref={containerRef} />
+      <div className="floating graph-zoom">
+        <button
+          className="ghost icon-button small"
+          title="fit the graph to the panel"
+          onClick={() => cyRef.current?.fit(cyRef.current.elements(":visible"), FIT_PADDING)}
+        >
+          <FitIcon />
+        </button>
+        <button className="ghost icon-button small" title="zoom in" onClick={() => zoomBy(ZOOM_STEP)}>
+          <PlusIcon />
+        </button>
+        <button className="ghost icon-button small" title="zoom out" onClick={() => zoomBy(1 / ZOOM_STEP)}>
+          <MinusIcon />
+        </button>
+      </div>
       {showHulls && (
         <svg className="hulls">
           <g transform={`translate(${viewport.x},${viewport.y}) scale(${viewport.zoom})`}>
@@ -428,10 +466,10 @@ function runLayout(
     fixedNodeConstraint: landmarks,
     initialEnergyOnIncremental: 0.1, // incremental layouts only nudge nodes
     fit: first,
-    padding: 40,
+    padding: FIT_PADDING,
     animate: !first, // the first placement just appears; later ones glide
     animationDuration: LAYOUT_ANIMATION_MS,
-    nodeRepulsion: 6000,
+    nodeRepulsion: 9000,
     gravity: 0.3,
     idealEdgeLength: (edge: cytoscape.EdgeSingular) => IDEAL_EDGE_LENGTH[edge.data("layer") as Layer],
     // Strong social ties pull harder, so close-knit groups visibly cluster.
