@@ -73,7 +73,15 @@ uv run python -m graphsim.experiment ablations --report      # print the report 
 uv run python -m graphsim.experiment ablations --reanalyze   # after editing analysis.py
 uv run python -m graphsim.experiment topologies              # 6 worlds × 50 seeds
 uv run python -m graphsim.experiment bridges                 # bridges 1-4 × merchant placement
+uv run python -m graphsim.experiment remove_broker           # interventions: see below
+uv run python -m graphsim.experiment late_bridge
+uv run python -m graphsim.experiment drought_relief
 ```
+
+An experiment with `branch_at` intervenes: each run is branched at that tick once per control
+(`none`, `reseed`) and per arm (named interventions, see `docs/spec.md`), and each arm is
+compared with `none` seed by seed, next to how far `reseed` (chance alone) moves the same
+measures.
 
 Runs execute in parallel, and identical runs are reused, so an interrupted experiment resumes.
 
@@ -124,6 +132,13 @@ uv run python -m graphsim.cli --scenario two_regions --set generator.bridges=3
     highlight its members and open its page, which shows its size, internal trust, density and
     trade over time, who joined and left, and its key events. Organizations have the same page
     (click an organization node, then *Open page*).
+  - **Intervene.** Pause where history should split and press *Intervene*: pick changes
+    (remove an agent, give coin or food, subsidize an occupation, change a setting, build or
+    close a road or a site, create or cut a tie, set trust, found an organization, start or end
+    a drought), queue as many as you like, and *Branch*. The branch is a new run, identical up
+    to that tick, and opens next to the original.
+  - **Branches.** A run's family tree: what it branched from, its branches and how each ended
+    compared with it. Branch points are marked on the scrubber and on the timeline.
 - **Scenarios.** Every world as a card: its map (towns sized by population, with their mix of
   occupations; sites; roads), totals and generator parameters, with buttons to start a run there
   or open its latest run. Above the cards, a worlds × phenomena grid from the `topologies`

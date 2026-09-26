@@ -81,6 +81,7 @@ Every edge is keyed by `(a, b, layer)`, so two nodes can be connected on several
 
 ## Tick order (`engine.step`, top to bottom)
 
+0. **Interventions** scheduled for this tick, if any (see *Interventions and branches*).
 1. **Consume.** Goods spoil, then agents eat. After `leave_after_hungry` hungry ticks an agent
    leaves. Newcomers (`arrival_chance`) fill the job each town is most short of, compared with
    its `founding` mix.
@@ -208,8 +209,52 @@ Every run is stored in the run database (`[run] database`, SQLite) and never ove
 - **`summary` recording** (for batch experiments) keeps metrics every 5 ticks, notable events,
   agent lifetimes, each agent's lifetime ledger totals by category, and community records.
 
-Identical runs are identified by config hash, seed, length and code version, and reused rather
-than recomputed. Any summary run can be recomputed at full detail, and it is the same world.
+Identical runs are identified by config hash, seed, length, code version and interventions,
+and reused rather than recomputed. Any summary run can be recomputed at full detail, and it is
+the same world.
+
+## Interventions and branches
+
+An **intervention** changes a running world from outside, at the start of a tick
+(`backend/graphsim/interventions.py`). It is data, e.g. `{tick = 1000, kind = "remove_agent",
+target = "top_broker"}`:
+
+| Group | Kinds |
+|---|---|
+| Shocks | `remove_agent`, `start_drought` (for `length` ticks), `end_drought` |
+| Economy | `give` (coin or a good; negative takes), `subsidize` (an occupation, coin per tick, for ticks), `set` (any setting, e.g. `trade.broker_commission`, checked like the file) |
+| Geography | `add_road`, `remove_road` (merchants' reach follows the roads), `add_site`, `remove_site` |
+| Social | `link`, `sever`, `set_trust`, `found_org` |
+| Control | `reseed`: the same world with a fresh random stream |
+
+Targets are node ids, or rules resolved at that tick (agent ids and names differ between
+seeds): `top_broker`, `richest`, `poorest`, `most_connected`, `starving` (everyone starving),
+`occupation:<name>`, `town:<name>`, `site:<name>`, `strongest_tie_of:<target>`. Every
+intervention logs an `intervention` event that what it directly causes cites (a removed agent's
+`left`, a drought it starts), and the coin and goods it moves are ledger flows (`intervention`,
+`subsidy`), so the ledger stays complete. With nothing scheduled the step does nothing, and
+runs are identical to runs made before interventions existed.
+
+A **branch** is an alternate history of a stored run (`runner.branch`): the same world up to
+tick T, then with interventions. Runs are deterministic, so a branch doesn't load saved state;
+it replays its parent (with every earlier intervention in its history), checks the replay
+against what the parent stored, and runs on. It refuses parents made by other code or settings.
+A branch stores only its own ticks; `storage.lineage` says which run holds which ticks, and
+every reader of tick-indexed data (metrics, snapshots, events and their causes, histories,
+ledgers) reads through it, so a branch reads like a whole run and why-trails cross the branch
+point. Branches of branches work the same way. A branch's measures describe its own part: from
+T to the end.
+
+**Experiments that intervene** (`branch_at`, `controls`, `arms`) branch every run at the same
+tick, once per control and once per arm:
+
+- `none`: continue unchanged. Every arm is compared with it, seed by seed.
+- `reseed`: the same world, a fresh random stream. The simulation is chaotic: any nudge makes a
+  run diverge, so an arm's difference from `none` mixes its real effect with chance. `reseed`
+  measures chance alone. The report gives, per measure, the median size of `reseed`'s difference
+  (the noise floor) and the share of seeds where the arm moved the measure further, **"beyond
+  chance"**. With no real effect that share is about 50% (the noise floor is a median); a clear
+  effect pushes it towards 100%.
 
 ## Measures and phenomena
 
@@ -325,3 +370,37 @@ Other results:
 - **Caveat: where merchants live is a modelling choice.** It moved the results as much as the
   roads did (bridges: 1, brokers' share 0.81 at the bridge towns against 0.55 in every town).
   `generators.place_merchants_two_regions` is where to try other rules.
+
+## What the intervention study found
+
+Each experiment branches every run at the same tick into `none`, `reseed` and one or more arms
+(50 seeds, 2000 ticks; measures cover the branch's part, from the branch tick on). "Beyond
+chance" is the share of seeds where the arm moved a measure further than `reseed` typically
+does: about 50% means no effect, near 100% a clear one.
+
+- **Removing the top broker (`remove_broker`, tick 1000, three_towns and hub_and_spokes): no
+  lasting effect.** Every measure stays within chance (beyond chance in 48–58% of seeds);
+  brokerage, inequality, drought shock and solidarity all look as if nothing happened. In the
+  viewer, another merchant becomes the top broker within the same tick. Brokerage is a
+  position in the network, not a person: whoever sits there takes the role.
+- **A second bridge built late (`late_bridge`, two_regions with merchants in every town,
+  tick 1000): no detectable effect.** Against `none`, every measure is within chance (beyond
+  chance in 30–54%). The late-bridge worlds' final Gini (median 0.69) lies between one bridge
+  (0.79) and two bridges from the start (0.67), but seeds vary too much for 50 of them to tell
+  whether history matters here. As a check, "building" the bridge in the world that already
+  has it changes nothing: those runs equal `none` exactly, in every seed.
+- **One-off food relief (`drought_relief`, 10 food to everyone starving 20 ticks into the
+  tick-1000 drought): no clear effect.** In 13 of 50 seeds nobody was starving at that moment,
+  so the relief was skipped and those runs equal `none` (this pulls the report's median
+  differences to 0; read the per-seed numbers). In the 37 seeds where 1–3 agents were fed,
+  the drought starvation ratio is slightly lower (median −0.43, beyond chance in 65% of seeds)
+  and nothing else moves beyond chance. A hint at most: a small, one-off change, measured over
+  980 ticks that include four more droughts.
+
+Taken together: this economy absorbs single shocks. What changes outcomes is structure (who
+can reach whom, how many merchants, droughts at all: see the ablation and scenario studies),
+not removing one person or feeding a few once.
+
+Caveat for future experiments: an intervention whose target doesn't exist at its tick is
+skipped (and logged as skipped). An arm whose target is often missing looks like a smaller
+effect than it is. Check the `intervention` events of the arm's runs.
