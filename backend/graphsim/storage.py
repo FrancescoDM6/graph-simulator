@@ -468,14 +468,15 @@ def community_members(conn: sqlite3.Connection, run_id: int, tick: int) -> dict[
 
 
 def experiment_runs(conn: sqlite3.Connection, experiment: str) -> list[dict[str, Any]]:
-    """(label, seed, run_id, scenario) for every job of the experiment with a finished run."""
+    """(label, seed, run_id, scenario, overrides) for every job of the experiment with a
+    finished run."""
     rows = conn.execute(
-        """select x.label, x.seed, x.run_id, r.scenario from experiment_runs x
+        """select x.label, x.seed, x.run_id, r.scenario, r.overrides from experiment_runs x
            join runs r on r.id = x.run_id
            where x.experiment = ? and r.status = 'done' order by x.label, x.seed""",
         (experiment,),
     )
-    return [dict(row) for row in rows]
+    return [{**dict(row), "overrides": json.loads(row["overrides"])} for row in rows]
 
 
 def all_measures(conn: sqlite3.Connection, run_ids: list[int]) -> dict[int, dict[str, float]]:

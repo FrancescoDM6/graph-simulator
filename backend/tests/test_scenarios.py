@@ -65,6 +65,26 @@ def test_bridges_join_the_regions_and_nothing_else_changes():
         assert totals(cfg) == totals(scenario.config(scenario="two_regions"))
 
 
+def test_merchants_live_at_the_bridges_or_in_every_town():
+    scenario = load_scenario()
+
+    def merchant_towns(bridges, rule):
+        cfg = scenario.config(
+            scenario="two_regions",
+            overrides={"generator.bridges": bridges, "generator.merchants": rule},
+        )
+        return {
+            t: s.founding["merchant"]
+            for t, s in cfg.world.towns.items()
+            if "merchant" in s.founding
+        }
+
+    assert sorted(merchant_towns(1, "bridge_towns").values()) == [2, 2]  # two bridge ends
+    assert sorted(merchant_towns(3, "bridge_towns").values()) == [1, 1, 1, 1]
+    for bridges in (1, 3):
+        assert sorted(merchant_towns(bridges, "every_town").values()) == [1, 1, 1, 1]
+
+
 def test_split_resources_put_every_farm_in_the_west():
     cfg = load_scenario().config(scenario="resource_imbalance")
     for spec in cfg.world.towns.values():

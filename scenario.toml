@@ -301,13 +301,13 @@ variants = ["baseline"]
 sweep = {}
 
 [experiments.bridges]
-description = "When do two regions split apart, and do brokers gather on the bridges?"
+description = "When do two regions split apart, and do brokers gather on the bridges? Merchants either live at the bridges (so they move as bridges are added) or in every town (so only the roads change)."
 seeds = "1-30"
 ticks = 2000
 level = "summary"
 scenarios = ["two_regions"]
 variants = ["baseline"]
-sweep = { "generator.bridges" = [1, 2, 3, 4] }
+sweep = { "generator.bridges" = [1, 2, 3, 4], "generator.merchants" = ["bridge_towns", "every_town"] }
 
 [experiments.commission_sweep]
 description = "How broker power depends on the commission."

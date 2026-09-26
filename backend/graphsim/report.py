@@ -9,7 +9,9 @@ Three views of the same stored runs:
            removes most of the seed-to-seed noise. We report the median difference and how
            consistently the difference points one way ("same sign" = share of seeds agreeing
            with the median). Different worlds are never paired (the same seed on a different
-           map is a different world): compare them by their distributions in `summary`.
+           map is a different world): compare them by their distributions in `summary`. A
+           world is a scenario plus its generator parameters, so each value of a swept
+           generator parameter (e.g. bridges) is a world of its own.
 """
 
 import csv
@@ -40,7 +42,7 @@ def build(conn, scenario: Scenario, experiment: str) -> dict[str, Any]:
 
     labels = list(dict.fromkeys(r["label"] for r in runs))
     measure_names = sorted({m for r in runs for m in r["measures"]})
-    world_of = {r["label"]: r["scenario"] for r in runs}
+    world_of = {r["label"]: _world(r) for r in runs}
     worlds = list(dict.fromkeys(world_of.values()))
     baseline_of_world = {
         w: _baseline_label([lb for lb in labels if world_of[lb] == w]) for w in worlds
@@ -225,6 +227,14 @@ def _paired(diffs: list[float]) -> dict[str, Any]:
         "mean_diff": mean(diffs),
         "same_sign": same_sign,
     }
+
+
+def _world(run: dict[str, Any]) -> str:
+    """Which map a run was made on: its scenario plus any generator parameters it set."""
+    params = sorted(
+        (k, v) for k, v in run.get("overrides", {}).items() if k.startswith("generator.")
+    )
+    return run["scenario"] + "".join(f"[{k}={v}]" for k, v in params)
 
 
 def _baseline_label(labels: list[str]) -> str | None:

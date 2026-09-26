@@ -164,3 +164,5 @@ def test_generator_parameters_can_be_swept(scenario):
     assert set(labels) == {"baseline[generator.bridges=1]", "baseline[generator.bridges=3]"}
     one, three = (storage.get_run(conn, labels[f"baseline[generator.bridges={b}]"]) for b in (1, 3))
     assert one["config_hash"] != three["config_hash"]  # different maps
+    # ... so they are different worlds, and never paired with each other.
+    assert report.build(conn, scenario, "bridges")["paired"] == []

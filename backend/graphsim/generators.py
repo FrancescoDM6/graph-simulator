@@ -77,10 +77,12 @@ def two_regions(
     towns_per_region: int,
     bridges: int,
     resources: str,
+    merchants: str,
 ) -> dict[str, Any]:
     """Two regions of `towns_per_region` towns, every town joined to every other in its region,
     and `bridges` roads across. resources = "balanced": each region has every site kind;
-    "split": the West has the first site kind (farms) and the East all the others (mines)."""
+    "split": the West has the first site kind (farms) and the East all the others (mines).
+    merchants: where they live (see place_merchants_two_regions)."""
     n = towns_per_region
     if n < 1:
         raise GeneratorError("two_regions: towns_per_region must be at least 1")
@@ -88,6 +90,8 @@ def two_regions(
         raise GeneratorError(f"two_regions: bridges must be between 1 and {n * n}")
     if resources not in ("balanced", "split"):
         raise GeneratorError('two_regions: resources must be "balanced" or "split"')
+    if merchants not in ("bridge_towns", "every_town"):
+        raise GeneratorError('two_regions: merchants must be "bridge_towns" or "every_town"')
     west = [Town(TOWN_NAMES[i], (0.2, (i + 1) / (n + 1))) for i in range(n)]
     east = [Town(TOWN_NAMES[n + i], (0.8, (i + 1) / (n + 1))) for i in range(n)]
     kinds = list(layout.site_capacity)
@@ -107,14 +111,13 @@ def two_regions(
     )
     crossings = [(west[w], east[e]) for w, e in pairs[:bridges]]
     towns = [*west, *east]
-    place_people(
-        towns, layout, occupations, others_in=place_merchants_two_regions(west, east, crossings)
-    )
+    homes = place_merchants_two_regions(west, east, crossings, merchants)
+    place_people(towns, layout, occupations, others_in=homes)
     return world_tables(towns, inside + crossings, layout)
 
 
 def place_merchants_two_regions(
-    west: list[Town], east: list[Town], crossings: list[tuple[Town, Town]]
+    west: list[Town], east: list[Town], crossings: list[tuple[Town, Town]], rule: str
 ) -> list[Town]:
     """The towns merchants live in (they are shared out evenly among them).
 
@@ -123,8 +126,14 @@ def place_merchants_two_regions(
     over every town mostly broker inside their region, and cross-region trade then depends on
     how many of them happen to sit on a bridge.
 
-    Current choice: the towns at the ends of the bridges, West ends first.
+    "bridge_towns": the towns at the ends of the bridges, West ends first. Note that this moves
+    merchants as bridges are added (1 bridge: two towns with two merchants each; more: one in
+    every town), so a sweep over bridges also changes where merchants live.
+    "every_town": spread over all towns, whatever the bridges; a bridge sweep then changes roads
+    only.
     """
+    if rule == "every_town":
+        return [*west, *east]
     ends: list[Town] = []
     for w, e in crossings:
         for town in (w, e):
@@ -168,7 +177,10 @@ def villages(
 
 GENERATORS = {
     "hub_and_spokes": (hub_and_spokes, {"spokes": int}),
-    "two_regions": (two_regions, {"towns_per_region": int, "bridges": int, "resources": str}),
+    "two_regions": (
+        two_regions,
+        {"towns_per_region": int, "bridges": int, "resources": str, "merchants": str},
+    ),
     "villages": (villages, {"villages": int, "links": str}),
 }
 
