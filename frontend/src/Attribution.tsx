@@ -57,7 +57,7 @@ export function Attribution({ runId, run, agentId, cursor, stapleGood, name, onJ
           <option value="recent">last {RECENT} ticks</option>
         </select>
       </div>
-      {!itemized && <div className="muted small">Lifetime totals only (this run stored no itemized ledger).</div>}
+      {!itemized && <div className="faint small">Lifetime totals only (this run stored no itemized ledger).</div>}
       <BarChart
         title={`Coin ${change("coin") >= 0 ? "+" : ""}${change("coin").toFixed(1)}, by source`}
         bars={bars("coin")}
@@ -72,12 +72,17 @@ export function Attribution({ runId, run, agentId, cursor, stapleGood, name, onJ
       )}
       {ledger.counterparties.length > 0 && (
         <>
-          <div className="small muted">Biggest partners (coin)</div>
-          <ul className="compact-list">
+          <div className="label attribution-label">Biggest partners (coin)</div>
+          <ul className="rows plain">
             {ledger.counterparties.slice(0, 6).map((c) => (
               <li key={`${c.counterparty}-${c.category}`}>
-                {partner(c.counterparty)} <span className="muted">{c.category.replace(/_/g, " ")}</span>{" "}
-                <span className={c.coin >= 0 ? "up" : "down"}>{c.coin.toFixed(1)}</span>
+                <span>
+                  {partner(c.counterparty)} <span className="faint">{c.category.replace(/_/g, " ")}</span>
+                </span>
+                <span className={`num ${c.coin >= 0 ? "up" : "down"}`}>
+                  {c.coin >= 0 ? "+" : ""}
+                  {c.coin.toFixed(1)}
+                </span>
               </li>
             ))}
           </ul>
@@ -85,20 +90,25 @@ export function Attribution({ runId, run, agentId, cursor, stapleGood, name, onJ
       )}
       {trades.length > 0 && (
         <>
-          <div className="small muted">Recent trades and gifts</div>
-          <ul className="compact-list">
+          <div className="label attribution-label">Recent trades and gifts</div>
+          <ul className="rows">
             {trades.map((f, i) => (
               <li key={i}>
-                <button className="event-tick link" onClick={() => onJump(f.tick)}>
+                <button className="tick link" onClick={() => onJump(f.tick)}>
                   {f.tick}
-                </button>{" "}
-                {f.category.replace(/_/g, " ")} {partner(f.counterparty)}{" "}
-                <span className={f.amount >= 0 ? "up" : "down"}>{f.amount.toFixed(2)}</span>
-                {f.event_id >= 0 && (
-                  <button className="link small why" onClick={() => onWhy(f.event_id)}>
-                    why?
-                  </button>
-                )}
+                </button>
+                <span>
+                  {f.category.replace(/_/g, " ")} {partner(f.counterparty)}{" "}
+                  <span className={`num ${f.amount >= 0 ? "up" : "down"}`}>
+                    {f.amount >= 0 ? "+" : ""}
+                    {f.amount.toFixed(2)}
+                  </span>
+                  {f.event_id >= 0 && (
+                    <button className="link why" onClick={() => onWhy(f.event_id)}>
+                      why?
+                    </button>
+                  )}
+                </span>
               </li>
             ))}
           </ul>

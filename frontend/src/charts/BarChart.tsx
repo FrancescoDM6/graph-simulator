@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { ExportMenu } from "../ExportMenu";
 import { figureFromElement } from "../export";
 import { useElementWidth } from "../hooks/useElementWidth";
-import { CHART_BACKGROUND } from "./LineChart";
+import { FIGURE_BACKGROUND, THEME } from "../theme";
 
 export interface Bar {
   label: string;
@@ -16,8 +16,8 @@ interface Props {
   exportAs?: { stem: string; description: string };
 }
 
-const ROW = 18;
-const LABEL = 130;
+const ROW = 20;
+const LABEL = 110;
 const VALUE = 64;
 
 /** Horizontal bars around zero, e.g. where an agent's coin came from and went. */
@@ -38,7 +38,7 @@ export function BarChart({ title, bars, exportAs }: Props) {
           stem={exportAs.stem}
           title={title}
           description={exportAs.description}
-          figure={() => (svgRef.current ? figureFromElement(svgRef.current, CHART_BACKGROUND) : null)}
+          figure={() => (svgRef.current ? figureFromElement(svgRef.current, FIGURE_BACKGROUND) : null)}
           rows={() => [["label", "value", "note"], ...bars.map((b) => [b.label, b.value, b.note ?? ""])]}
         />
       )}
@@ -61,7 +61,8 @@ export function BarChart({ title, bars, exportAs }: Props) {
                   width={Math.max(1, length)}
                   height={ROW - 6}
                   rx={2}
-                  fill={bar.value >= 0 ? "#7bd88f" : "#ff6b6b"}
+                  fill={bar.value >= 0 ? THEME.good : THEME.danger}
+                  opacity={0.85}
                 >
                   {bar.note && <title>{bar.note}</title>}
                 </rect>

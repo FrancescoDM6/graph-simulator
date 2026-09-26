@@ -59,83 +59,85 @@ export function Experiments({ scenario, onOpenRun }: Props) {
   const spec = scenario.experiments[name];
 
   return (
-    <div className="experiments">
-      <div className="experiment-header">
-        <label>
-          Experiment{" "}
-          <select value={name} onChange={(e) => setName(e.target.value)}>
+    <div className="experiments-page">
+      <div className="experiments-inner">
+        <div className="experiments-head">
+          <h1>Experiment</h1>
+          <select value={name} onChange={(e) => setName(e.target.value)} aria-label="experiment">
             {names.map((n) => (
               <option key={n} value={n}>
                 {n}
               </option>
             ))}
           </select>
-        </label>
-        {spec && (
-          <span className="muted">
-            {spec.description} ({spec.seeds} seeds × {spec.variants.length} variants, {spec.ticks} ticks)
-          </span>
+          {spec && (
+            <span className="faint">
+              {spec.seeds} seeds × {spec.variants.length} variants × {spec.ticks} ticks
+            </span>
+          )}
+        </div>
+        {spec && <p className="experiments-intro">{spec.description}</p>}
+        {error && <div className="error">{error}</div>}
+        {report && report.runs.length === 0 && (
+          <div className="card muted">
+            No runs stored yet. Run <code>uv run python -m graphsim.experiment {name}</code> in backend/.
+          </div>
+        )}
+        {report && report.runs.length > 0 && (
+          <>
+            <p className="experiments-intro small">
+              {report.runs.length} runs. Each dot is one seed (click it to open that world); the white tick is the
+              median, hollow dots are worlds without the phenomenon. Right: share of worlds showing it [95% interval],
+              then the median change from {report.baseline} for the same seed (share of seeds changing that way).
+            </p>
+            {Object.entries(scenario.phenomena).map(([phenomenon, p]) => (
+              <section key={phenomenon} className="card">
+                <div className="card-head">
+                  <h2>{phenomenon.replace(/_/g, " ")}</h2>
+                  <span className="description">{p.description}</span>
+                  <span className="threshold-chip">
+                    present if {p.measure} {p.present_if}
+                  </span>
+                </div>
+                <StripPlot
+                  rows={rowsFor(p.measure, phenomenon)}
+                  threshold={Number(p.present_if.split(" ")[1])}
+                  onPick={onOpenRun}
+                  exportAs={{
+                    stem: `experiment_${name}_${phenomenon}`,
+                    title: `${phenomenon}: ${p.measure} per variant`,
+                    description: `experiment ${name} (${report.runs.length} runs); present if ${p.measure} ${p.present_if}; right: share present [95% CI], median change vs ${report.baseline} for the same seed (share of seeds)`,
+                  }}
+                />
+              </section>
+            ))}
+            <section className="card">
+              <div className="card-head">
+                <h2>Any measure</h2>
+                <select value={extraMeasure} onChange={(e) => setExtraMeasure(e.target.value)} aria-label="measure">
+                  <option value="">choose…</option>
+                  {measures.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {extraMeasure && (
+                <StripPlot
+                  rows={rowsFor(extraMeasure)}
+                  onPick={onOpenRun}
+                  exportAs={{
+                    stem: `experiment_${name}_${extraMeasure}`,
+                    title: `${extraMeasure} per variant`,
+                    description: `experiment ${name} (${report.runs.length} runs); right: median change vs ${report.baseline} for the same seed`,
+                  }}
+                />
+              )}
+            </section>
+          </>
         )}
       </div>
-      {error && <div className="error">{error}</div>}
-      {report && report.runs.length === 0 && (
-        <div className="muted">
-          No runs stored yet. Run <code>uv run python -m graphsim.experiment {name}</code> in backend/.
-        </div>
-      )}
-      {report && report.runs.length > 0 && (
-        <>
-          <p className="muted small">
-            {report.runs.length} runs. Each dot is one seed (click to open that world). Right: share of worlds showing
-            the phenomenon [95% interval], then the median change from {report.baseline} for the same seed (share of
-            seeds changing that way). Hollow dots: phenomenon absent.
-          </p>
-          {Object.entries(scenario.phenomena).map(([phenomenon, p]) => (
-            <section key={phenomenon} className="phenomenon">
-              <h3>
-                {phenomenon} <span className="muted">— {p.description}</span>
-              </h3>
-              <div className="muted small">
-                present if {p.measure} {p.present_if}
-              </div>
-              <StripPlot
-                rows={rowsFor(p.measure, phenomenon)}
-                threshold={Number(p.present_if.split(" ")[1])}
-                onPick={onOpenRun}
-                exportAs={{
-                  stem: `experiment_${name}_${phenomenon}`,
-                  title: `${phenomenon}: ${p.measure} per variant`,
-                  description: `experiment ${name} (${report.runs.length} runs); present if ${p.measure} ${p.present_if}; right: share present [95% CI], median change vs ${report.baseline} for the same seed (share of seeds)`,
-                }}
-              />
-            </section>
-          ))}
-          <section className="phenomenon">
-            <h3>
-              Any measure{" "}
-              <select value={extraMeasure} onChange={(e) => setExtraMeasure(e.target.value)}>
-                <option value="">choose…</option>
-                {measures.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </h3>
-            {extraMeasure && (
-              <StripPlot
-                rows={rowsFor(extraMeasure)}
-                onPick={onOpenRun}
-                exportAs={{
-                  stem: `experiment_${name}_${extraMeasure}`,
-                  title: `${extraMeasure} per variant`,
-                  description: `experiment ${name} (${report.runs.length} runs); right: median change vs ${report.baseline} for the same seed`,
-                }}
-              />
-            )}
-          </section>
-        </>
-      )}
     </div>
   );
 }

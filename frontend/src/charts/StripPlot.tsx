@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { ExportMenu } from "../ExportMenu";
 import { figureFromElement } from "../export";
 import { useElementWidth } from "../hooks/useElementWidth";
-import { CHART_BACKGROUND } from "./LineChart";
+import { FIGURE_BACKGROUND } from "../theme";
 
 export interface StripRow {
   label: string;
@@ -18,9 +18,9 @@ interface Props {
   exportAs?: { stem: string; title: string; description: string };
 }
 
-const ROW_HEIGHT = 22;
-const LABEL_WIDTH = 190;
-const NOTE_WIDTH = 190;
+const ROW_HEIGHT = 26;
+const LABEL_WIDTH = 210;
+const NOTE_WIDTH = 200;
 
 /** One row of dots per variant: every run's value of a measure, its median, and a threshold. */
 export function StripPlot({ rows, threshold, onPick, exportAs }: Props) {
@@ -41,7 +41,7 @@ export function StripPlot({ rows, threshold, onPick, exportAs }: Props) {
           stem={exportAs.stem}
           title={exportAs.title}
           description={exportAs.description}
-          figure={() => (svgRef.current ? figureFromElement(svgRef.current, CHART_BACKGROUND) : null)}
+          figure={() => (svgRef.current ? figureFromElement(svgRef.current, FIGURE_BACKGROUND) : null)}
           rows={() => [
             ["variant", "seed", "run_id", "value", "present"],
             ...rows.flatMap((r) => r.points.map((p) => [r.label, p.seed, p.runId, p.value, p.present ?? ""])),
@@ -57,7 +57,8 @@ export function StripPlot({ rows, threshold, onPick, exportAs }: Props) {
             const y = i * ROW_HEIGHT + ROW_HEIGHT / 2;
             return (
               <g key={row.label}>
-                <text className="lane-label" x={0} y={y + 4}>
+                {i % 2 === 0 && <rect className="row-band" x={0} y={i * ROW_HEIGHT} width={width} height={ROW_HEIGHT} rx={4} />}
+                <text className="lane-label" x={8} y={y + 4}>
                   {row.label}
                 </text>
                 {row.points.map((p, j) => (
@@ -73,7 +74,7 @@ export function StripPlot({ rows, threshold, onPick, exportAs }: Props) {
                   </circle>
                 ))}
                 {row.median !== null && (
-                  <line className="median" x1={x(row.median)} x2={x(row.median)} y1={y - 8} y2={y + 8} />
+                  <line className="median" x1={x(row.median)} x2={x(row.median)} y1={y - 9} y2={y + 9} />
                 )}
                 {row.note && (
                   <text className="lane-fate" x={LABEL_WIDTH + plotWidth + 12} y={y + 4}>

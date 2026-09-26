@@ -23,7 +23,7 @@ interface Props {
 
 /** The events leading up to the cursor, newest first. */
 export function EventFeed({ runId, cursor, liveIds, onSelect, onJump, onWhy }: Props) {
-  const [events, setEvents] = useState<SimEvent[]>([]);
+  const [events, setEvents] = useState<SimEvent[] | null>(null); // null until the first fetch
   const [structuralOnly, setStructuralOnly] = useState(false);
   const [withDetail, setWithDetail] = useState(false);
 
@@ -40,21 +40,21 @@ export function EventFeed({ runId, cursor, liveIds, onSelect, onJump, onWhy }: P
     };
   }, [runId, cursor, withDetail]);
 
-  const shown = structuralOnly ? events.filter((e) => STRUCTURAL_KINDS.has(e.kind)) : events;
+  const shown = (structuralOnly ? events?.filter((e) => STRUCTURAL_KINDS.has(e.kind)) : events) ?? [];
   return (
-    <section className="event-feed">
-      <div className="panel-header">
-        <span>
-          Events <span className="muted">(ticks {Math.max(0, cursor - WINDOW)}–{cursor})</span>
+    <section className="feed">
+      <div className="panel-toolbar">
+        <span className="num">
+          Ticks {Math.max(0, cursor - WINDOW)}–{cursor}
         </span>
-        <span className="header-options">
-          <label>
-            <input type="checkbox" checked={structuralOnly} onChange={(e) => setStructuralOnly(e.target.checked)} />{" "}
+        <span className="options">
+          <label className="check">
+            <input type="checkbox" checked={structuralOnly} onChange={(e) => setStructuralOnly(e.target.checked)} />
             network-level only
           </label>
-          <label>
-            <input type="checkbox" checked={withDetail} onChange={(e) => setWithDetail(e.target.checked)} /> every
-            trade attempt
+          <label className="check">
+            <input type="checkbox" checked={withDetail} onChange={(e) => setWithDetail(e.target.checked)} />
+            every trade attempt
           </label>
         </span>
       </div>
@@ -71,25 +71,30 @@ export function EventFeed({ runId, cursor, liveIds, onSelect, onJump, onWhy }: P
                 event.tick === cursor ? "now" : "",
               ].join(" ")}
             >
-              <button className="event-tick link" onClick={() => onJump(event.tick)} title="go to this tick">
+              <button className="tick link" onClick={() => onJump(event.tick)} title="go to this tick">
                 {event.tick}
               </button>
-              <span
-                className={`event-message ${target ? "clickable" : ""}`}
-                onClick={() => target && onSelect(target)}
-              >
-                {event.message}
+              <span>
+                <span
+                  className={`event-message ${target ? "clickable" : ""}`}
+                  onClick={() => target && onSelect(target)}
+                >
+                  {event.message}
+                </span>
+                {event.caused_by.length > 0 && (
+                  <button className="link why" onClick={() => onWhy(event.id)}>
+                    why?
+                  </button>
+                )}
               </span>
-              {event.cause && <span className="event-cause">{event.cause}</span>}
-              {event.caused_by.length > 0 && (
-                <button className="link small why" onClick={() => onWhy(event.id)}>
-                  why?
-                </button>
-              )}
+              {event.cause && <span className="cause">{event.cause}</span>}
             </li>
           );
         })}
-        {shown.length === 0 && <li className="muted">Nothing in this window.</li>}
+        {events === null && <li className="empty-state">Loading…</li>}
+        {events !== null && shown.length === 0 && (
+          <li className="empty-state">Nothing happened in the last {WINDOW} ticks.</li>
+        )}
       </ol>
     </section>
   );

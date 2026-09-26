@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { downloadCsv, downloadPng, downloadSvg, type Figure, withMetadata } from "./export";
+import { DownloadIcon } from "./icons";
 
 interface Props {
   stem: string; // file name without extension, e.g. "run834_seed4_baseline_timeline"
@@ -9,7 +10,7 @@ interface Props {
   rows?: () => (string | number | boolean | null | undefined)[][]; // CSV, first row = headers
 }
 
-/** A small "Export" button offering SVG, PNG (2x, 4x) and CSV of what a chart shows. */
+/** A download button offering SVG, PNG (2x, 4x) and CSV of what a chart shows. */
 export function ExportMenu({ stem, title, description, figure, rows }: Props) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -29,11 +30,11 @@ export function ExportMenu({ stem, title, description, figure, rows }: Props) {
 
   return (
     <span className="export-menu">
-      <button className="export-button" title="export this figure" onClick={() => setOpen(!open)}>
-        ⤓
+      <button className="ghost icon-button small export-button" title="export this figure" onClick={() => setOpen(!open)}>
+        <DownloadIcon />
       </button>
       {open && (
-        <span className="export-options" onMouseLeave={() => setOpen(false)}>
+        <span className="popover export-options" onMouseLeave={() => setOpen(false)}>
           {figure && (
             <>
               <button onClick={() => run(() => { const f = labelled(); if (f) downloadSvg(f, stem); })}>SVG</button>

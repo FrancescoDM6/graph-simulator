@@ -5,14 +5,13 @@ import type { TrailNode } from "./types";
 interface Props {
   runId: number;
   eventId: number;
-  onClose: () => void;
   onJump: (tick: number, subject: string | null) => void;
 }
 
 /** "Why did this happen?": the event, the events that led to it, and so on backwards.
  * Recorded causes are contributing causes the rules knew about, not proof; for proof, compare
  * runs with and without a mechanism (the Experiments tab). */
-export function CausalTrail({ runId, eventId, onClose, onJump }: Props) {
+export function CausalTrail({ runId, eventId, onJump }: Props) {
   const [root, setRoot] = useState<TrailNode | null>(null);
   const [error, setError] = useState("");
 
@@ -27,23 +26,24 @@ export function CausalTrail({ runId, eventId, onClose, onJump }: Props) {
   }
 
   return (
-    <aside className="trail">
-      <div className="panel-header">
-        <span>Why?</span>
-        <button onClick={onClose}>Close</button>
+    <div className="trail">
+      <div className="page-title">
+        <h2>Why did this happen?</h2>
+        <p className="small">
+          Each step lists what the simulation recorded as contributing to the step above it. To test whether a cause
+          really matters, compare runs with and without that mechanism.
+        </p>
       </div>
-      {error && <div className="error">{error}</div>}
-      {!root && !error && <div className="muted">Loading…</div>}
-      {root && (
-        <ol className="trail-tree">
-          <TrailItem node={root} onExpand={expand} onJump={onJump} />
-        </ol>
-      )}
-      <p className="muted small">
-        Each step lists what the simulation recorded as contributing to the step above it. To test whether a cause
-        really matters, compare runs with and without that mechanism.
-      </p>
-    </aside>
+      <section className="panel-section">
+        {error && <div className="error">{error}</div>}
+        {!root && !error && <div className="faint">Loading…</div>}
+        {root && (
+          <ol className="trail-tree">
+            <TrailItem node={root} onExpand={expand} onJump={onJump} />
+          </ol>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -57,20 +57,25 @@ function TrailItem({
   onJump: (tick: number, subject: string | null) => void;
 }) {
   if (node.missing) {
-    return <li className="muted">(a routine event not stored in this summary run)</li>;
+    return <li className="faint small">(a routine event not stored in this summary run)</li>;
   }
   const hasCauses = (node.caused_by?.length ?? 0) > 0;
   return (
     <li>
-      <button className="trail-node" onClick={() => onJump(node.tick ?? 0, node.subjects?.[0] ?? null)}>
-        <span className="event-tick">tick {node.tick}</span>
-        <span className="kind-badge">{node.kind}</span>
+      <button
+        className="trail-node"
+        onClick={() => onJump(node.tick ?? 0, node.subjects?.[0] ?? null)}
+        title="go to this tick"
+      >
+        <span className="meta">
+          tick {node.tick} <span className="kind-badge">{node.kind}</span>
+        </span>
         <span>{node.message}</span>
-        {node.cause && <span className="event-cause">{node.cause}</span>}
+        {node.cause && <span className="cause small">{node.cause}</span>}
       </button>
       {hasCauses && node.causes === null && (
-        <button className="link small" onClick={() => onExpand(node)}>
-          why? ({node.caused_by?.length})
+        <button className="link why trail-more" onClick={() => onExpand(node)}>
+          why? ({node.caused_by?.length} more)
         </button>
       )}
       {node.causes && node.causes.length > 0 && (

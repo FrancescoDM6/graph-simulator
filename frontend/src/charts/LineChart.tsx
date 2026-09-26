@@ -1,10 +1,9 @@
-import { useRef } from "react";
+import { useId, useRef } from "react";
 import { ExportMenu } from "../ExportMenu";
 import { figureFromElement } from "../export";
 import { useElementWidth } from "../hooks/useElementWidth";
+import { FIGURE_BACKGROUND } from "../theme";
 import type { Series } from "../types";
-
-export const CHART_BACKGROUND = "#14161a";
 
 interface Props {
   label: string;
@@ -20,7 +19,7 @@ interface Props {
   exportAs?: { stem: string; description: string }; // shows an export button when given
 }
 
-const PAD = { left: 44, right: 8, top: 16, bottom: 4 };
+const PAD = { left: 36, right: 6, top: 18, bottom: 4 };
 
 /** One small chart of a metric over the whole run, with drought bands and the cursor. */
 export function LineChart(props: Props) {
@@ -28,6 +27,7 @@ export function LineChart(props: Props) {
   const [ref, width] = useElementWidth<HTMLDivElement>();
   const svgRef = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
+  const gradientId = `fill${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
 
   const all = [...a, ...(b ?? [])].map(([, v]) => v);
   const low = Math.min(0, ...all);
@@ -38,6 +38,10 @@ export function LineChart(props: Props) {
   const y = (value: number) => PAD.top + plotHeight - ((value - low) / (high - low)) * plotHeight;
   const path = (series: Series) =>
     series.map(([tick, v], i) => `${i ? "L" : "M"}${x(tick).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  // The area under the main line, closed along the bottom of the plot.
+  const area = a.length
+    ? `${path(a)}L${x(a[a.length - 1][0]).toFixed(1)},${PAD.top + plotHeight}L${x(a[0][0]).toFixed(1)},${PAD.top + plotHeight}Z`
+    : "";
 
   const valueAt = (series: Series | undefined) => {
     if (!series?.length) return null;
@@ -69,7 +73,7 @@ export function LineChart(props: Props) {
           stem={exportAs.stem}
           title={label}
           description={exportAs.description}
-          figure={() => (svgRef.current ? figureFromElement(svgRef.current, CHART_BACKGROUND) : null)}
+          figure={() => (svgRef.current ? figureFromElement(svgRef.current, FIGURE_BACKGROUND) : null)}
           rows={csvRows}
         />
       )}
@@ -86,31 +90,42 @@ export function LineChart(props: Props) {
           onMouseUp={() => (dragging.current = false)}
           onMouseLeave={() => (dragging.current = false)}
         >
+          <defs>
+            <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stopColor={color} stopOpacity={0.22} />
+              <stop offset="1" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
           {droughts.map(([start, end]) => (
-            <rect
-              key={start}
-              className="drought-band"
-              x={x(start)}
-              y={PAD.top}
-              width={Math.max(1, x(end) - x(start))}
-              height={plotHeight}
-            />
+            <g key={start}>
+              <rect
+                className="drought-band"
+                x={x(start)}
+                y={PAD.top}
+                width={Math.max(1, x(end) - x(start))}
+                height={plotHeight}
+              />
+              <rect className="drought-edge" x={x(start)} y={PAD.top} width={Math.max(1, x(end) - x(start))} height={2} />
+            </g>
           ))}
-          <text className="chart-label" x={PAD.left} y={11}>
+          <line className="chart-grid" x1={PAD.left} x2={PAD.left + plotWidth} y1={PAD.top + plotHeight / 2} y2={PAD.top + plotHeight / 2} />
+          <line className="chart-grid" x1={PAD.left} x2={PAD.left + plotWidth} y1={PAD.top + plotHeight} y2={PAD.top + plotHeight} />
+          <text className="chart-label" x={PAD.left} y={12}>
             {label}
             <tspan className="chart-value" fill={color}>
               {current !== null ? `  ${format(current)}` : ""}
             </tspan>
             {compared !== null && <tspan className="chart-value compare">{`  vs ${format(compared)}`}</tspan>}
           </text>
-          <text className="chart-axis" x={PAD.left - 4} y={PAD.top + 8} textAnchor="end">
+          <text className="chart-axis" x={PAD.left - 6} y={PAD.top + 7} textAnchor="end">
             {format(high)}
           </text>
-          <text className="chart-axis" x={PAD.left - 4} y={PAD.top + plotHeight} textAnchor="end">
+          <text className="chart-axis" x={PAD.left - 6} y={PAD.top + plotHeight} textAnchor="end">
             {format(low)}
           </text>
-          {b && <path d={path(b)} fill="none" stroke={color} strokeWidth={1.2} strokeDasharray="4 3" opacity={0.7} />}
-          <path d={path(a)} fill="none" stroke={color} strokeWidth={1.5} />
+          <path d={area} fill={`url(#${gradientId})`} stroke="none" />
+          {b && <path d={path(b)} fill="none" stroke={color} strokeWidth={1.2} strokeDasharray="4 3" opacity={0.6} />}
+          <path d={path(a)} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
           {markers?.map((m, i) => (
             <line key={i} className="marker" x1={x(m.tick)} x2={x(m.tick)} y1={PAD.top} y2={PAD.top + 6}>
               <title>{`tick ${m.tick}: ${m.label}`}</title>

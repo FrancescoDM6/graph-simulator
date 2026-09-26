@@ -1,14 +1,14 @@
 import type { Snapshot } from "./types";
 
 interface Props {
-  snapshot: Snapshot;
+  snapshot: Snapshot | null;
   onSelect: (id: string) => void;
 }
 
-/** One row of whole-network numbers at the cursor. */
+/** One line of whole-network numbers at the cursor (hover a number for what it means). */
 export function MetricsBar({ snapshot, onSelect }: Props) {
-  const m = snapshot.metrics;
-  if (!m) return <div className="metrics-bar muted">Tick 0: the world as it was built.</div>;
+  const m = snapshot?.metrics;
+  if (!snapshot || !m) return <div className="stats faint">Tick 0: the world as it was built.</div>;
 
   const byPrefix = (prefix: string) =>
     Object.entries(m)
@@ -27,7 +27,7 @@ export function MetricsBar({ snapshot, onSelect }: Props) {
     ["Components", `${m.social_components}`, "separate social groups"],
     ["Density", m.social_density.toFixed(2), "share of possible social ties that exist"],
     ["Clustering", m.social_clustering.toFixed(2), "how often friends of friends are friends"],
-    ["Avg trust", m.avg_trust.toFixed(2), "mean trust over social ties"],
+    ["Trust", m.avg_trust.toFixed(2), "mean trust over social ties"],
     ["Gini", m.gini_coin.toFixed(2), "inequality of coin: 0 equal, 1 one agent has all"],
     [
       "Prices",
@@ -38,28 +38,28 @@ export function MetricsBar({ snapshot, onSelect }: Props) {
         .map(([good]) => good)
         .join(" / "),
     ],
-    ["Trades", `${m.trades} ✓ ${m.failed_trades} ✗`, "trade attempts this tick"],
+    ["Trades", `${m.trades} ✓ ${m.failed_trades} ✗`, "trade attempts this tick: succeeded, failed"],
     ["Gifts", `${m.gifts}`, "gifts this tick"],
     ["Starving", `${m.starving}`, "agents who couldn't eat this tick"],
   ];
   return (
-    <div className="metrics-bar">
+    <div className="stats">
       {items.map(([label, value, hint]) => (
-        <div key={label} className="metric" title={hint}>
-          <span className="metric-label">{label}</span>
-          <span className="metric-value">{value}</span>
-        </div>
+        <span key={label} className="stat" title={hint}>
+          <span className="stat-label">{label}</span>
+          <span className="stat-value">{value}</span>
+        </span>
       ))}
-      <div className="metric" title="agent with the highest betweenness on the trade layer">
-        <span className="metric-label">Top broker</span>
+      <span className="stat" title="agent with the highest betweenness on the trade layer">
+        <span className="stat-label">Top broker</span>
         {broker ? (
-          <button className="link metric-value" onClick={() => onSelect(broker.id)}>
+          <button className="link" onClick={() => onSelect(broker.id)}>
             {broker.name} ({Math.round((m.top_broker_betweenness ?? 0) * 100)}%)
           </button>
         ) : (
-          <span className="metric-value">–</span>
+          <span className="stat-value">–</span>
         )}
-      </div>
+      </span>
     </div>
   );
 }

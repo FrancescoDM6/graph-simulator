@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { api } from "./api";
 import { Attribution } from "./Attribution";
 import { LineChart } from "./charts/LineChart";
@@ -47,75 +47,116 @@ export function Inspector(props: Props) {
 
   if (!selectedId) {
     return (
-      <aside className="inspector muted">
-        Click a node to see its state, its whole life in charts, its relationships and its history.
-      </aside>
+      <div className="empty-state">
+        <h2>Nothing selected</h2>
+        Click a node in the graph, a name in the event feed or the top broker below to see its state, its whole life
+        in charts, where its coin came from, its relationships and its history.
+      </div>
     );
   }
   const node = nodesById.get(selectedId);
   return (
-    <aside className="inspector">
-      {node ? (
-        <>
-          <h2>{node.name}</h2>
-          <div className="inspector-actions">
-            {node.kind === "agent" && (
-              <>
-                ego view:
-                {[1, 2].map((hops) => (
-                  <button
-                    key={hops}
-                    className={`small-button ${ego?.id === node.id && ego.hops === hops ? "active" : ""}`}
-                    onClick={() => onEgo({ id: node.id, hops })}
-                  >
-                    {hops} hop{hops > 1 ? "s" : ""}
-                  </button>
-                ))}
-                {ego && (
-                  <button className="small-button" onClick={() => onEgo(null)}>
-                    off
-                  </button>
-                )}
-                {node.community >= 0 && (
-                  <button className="small-button" onClick={() => onOpenGroup({ kind: "community", id: node.community })}>
-                    community {node.community} ›
-                  </button>
-                )}
-                {node.org && (
-                  <button className="small-button" onClick={() => onOpenGroup({ kind: "org", id: node.org! })}>
-                    organization ›
-                  </button>
-                )}
-              </>
+    <div className="inspector">
+      <div className="inspector-head">
+        <div className="label">{node ? KIND_LABELS[node.kind] : "Gone"}</div>
+        <h2>{node ? node.name : name(selectedId)}</h2>
+        {node && <Subtitle node={node} name={name} />}
+        {!node && <div className="subtitle">Not in the world at tick {snapshot.tick}</div>}
+        {node?.kind === "agent" && (
+          <div className="actions">
+            <span className="label">Ego view</span>
+            {[1, 2].map((hops) => (
+              <button
+                key={hops}
+                className={`ghost small ${ego?.id === node.id && ego.hops === hops ? "active" : ""}`}
+                onClick={() => onEgo(ego?.id === node.id && ego.hops === hops ? null : { id: node.id, hops })}
+                title="show only this agent's neighbourhood"
+              >
+                {hops} hop{hops > 1 ? "s" : ""}
+              </button>
+            ))}
+            <span className="spacer" />
+            {node.community >= 0 && (
+              <button className="small" onClick={() => onOpenGroup({ kind: "community", id: node.community })}>
+                Community {node.community}
+              </button>
             )}
-            {node.kind === "org" && (
-              <button className="small-button" onClick={() => onOpenGroup({ kind: "org", id: node.id })}>
-                organization page ›
+            {node.org && (
+              <button className="small" onClick={() => onOpenGroup({ kind: "org", id: node.org! })}>
+                Organization
               </button>
             )}
           </div>
+        )}
+        {node?.kind === "org" && (
+          <div className="actions">
+            <button className="small" onClick={() => onOpenGroup({ kind: "org", id: node.id })}>
+              Organization page
+            </button>
+          </div>
+        )}
+      </div>
+      {node && (
+        <section className="panel-section">
+          <h3>Now</h3>
           <NodeState node={node} name={name} />
-          {node.kind === "agent" && <AgentCharts {...props} agentId={node.id} />}
-          {node.kind === "agent" && (
-            <Attribution
-              runId={runId}
-              run={props.run}
-              agentId={node.id}
-              cursor={snapshot.tick}
-              stapleGood={props.stapleGood}
-              name={name}
-              onJump={props.onJump}
-              onWhy={props.onWhy}
-            />
-          )}
-          <Relationships node={node} edges={snapshot.edges} name={name} onSelect={onSelect} />
-        </>
-      ) : (
-        <h2 className="muted">Not in the world at tick {snapshot.tick}</h2>
+        </section>
       )}
+      {node?.kind === "agent" && <AgentCharts {...props} agentId={node.id} />}
+      {node?.kind === "agent" && (
+        <section className="panel-section">
+          <Attribution
+            runId={runId}
+            run={props.run}
+            agentId={node.id}
+            cursor={snapshot.tick}
+            stapleGood={props.stapleGood}
+            name={name}
+            onJump={props.onJump}
+            onWhy={props.onWhy}
+          />
+        </section>
+      )}
+      {node && <Relationships node={node} edges={snapshot.edges} name={name} onSelect={onSelect} />}
       <History runId={runId} entityId={selectedId} cursor={snapshot.tick} onJump={props.onJump} onWhy={props.onWhy} />
-    </aside>
+    </div>
   );
+}
+
+const KIND_LABELS: Record<GraphNode["kind"], string> = {
+  agent: "Agent",
+  town: "Town",
+  site: "Site",
+  org: "Organization",
+};
+
+/** One line under the name: what the node is, at a glance. */
+function Subtitle({ node, name }: { node: GraphNode; name: (id: string) => string }) {
+  switch (node.kind) {
+    case "agent":
+      return (
+        <div className="subtitle">
+          {node.occupation} in {name(node.home)}
+          {node.community >= 0 && (
+            <span className="badge">
+              <span className="dot" style={{ background: communityColor(node.community) }} />
+              community {node.community}
+            </span>
+          )}
+          {node.hunger_ticks > 0 && <span className="badge drought">starving</span>}
+        </div>
+      );
+    case "town":
+      return <div className="subtitle">{node.residents} residents</div>;
+    case "site":
+      return <div className="subtitle">{node.site_kind}</div>;
+    case "org":
+      return (
+        <div className="subtitle">
+          {node.members} members, based in {name(node.home)}
+        </div>
+      );
+  }
 }
 
 function NodeState({ node, name }: { node: GraphNode; name: (id: string) => string }) {
@@ -123,7 +164,6 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
   switch (node.kind) {
     case "agent":
       rows.push(
-        ["Occupation", `${node.occupation} in ${name(node.home)}`],
         ["Coin", node.coin.toFixed(1)],
         [
           "Holding",
@@ -134,17 +174,6 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
         ["Needs", node.need || "nothing"],
         ["Hungry for", node.hunger_ticks ? `${node.hunger_ticks} ticks` : "–"],
         ["Organization", node.org ? name(node.org) : "–"],
-        [
-          "Community",
-          node.community < 0 ? (
-            "–"
-          ) : (
-            <span>
-              <span className="dot" style={{ background: communityColor(node.community) }} />
-              {node.community}
-            </span>
-          ),
-        ],
         ["Broker score", `${Math.round(node.betweenness * 100)}% of trade paths`],
         ["Arrived", `tick ${node.arrived}`],
       );
@@ -162,10 +191,10 @@ function NodeState({ node, name }: { node: GraphNode; name: (id: string) => stri
   return (
     <dl className="state">
       {rows.map(([label, value]) => (
-        <div key={label}>
+        <Fragment key={label}>
           <dt>{label}</dt>
           <dd>{value}</dd>
-        </div>
+        </Fragment>
       ))}
     </dl>
   );
@@ -223,16 +252,16 @@ function AgentCharts({
       cursor={snapshot.tick}
       onPick={onPick}
       markers={markers}
-      height={56}
+      height={60}
       exportAs={exportAs(what)}
     />
   );
   const other = (entry: TrustEntry) => (entry.a === agentId ? entry.b : entry.a);
 
   return (
-    <>
+    <section className="panel-section">
       <h3>Over time</h3>
-      {history.length === 0 && <div className="muted small">No per-tick history stored for this run.</div>}
+      {history.length === 0 && <div className="faint small">No per-tick history stored for this run.</div>}
       {history.length > 0 && (
         <div className="agent-charts">
           {chart("Coin", "#f5d76e", series((t) => t.coin), "coin")}
@@ -243,49 +272,61 @@ function AgentCharts({
           })}
           {chart("Broker score", "#f0a04b", series((t) => t.betweenness), "broker-score")}
           {milestones.length > 0 && (
-            <ul className="compact-list">
-              {milestones.map((m) => (
-                <li key={m.id}>
-                  <button className="event-tick link" onClick={() => onJump(m.tick)}>
-                    {m.tick}
-                  </button>{" "}
-                  <b>{m.message}</b> <span className="event-cause">{m.cause}</span>
-                  <button className="link small why" onClick={() => onWhy(m.id)}>
-                    why?
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="label" style={{ marginTop: 8 }}>
+                Milestones
+              </div>
+              <ul className="rows">
+                {milestones.map((m) => (
+                  <li key={m.id}>
+                    <button className="tick link" onClick={() => onJump(m.tick)}>
+                      {m.tick}
+                    </button>
+                    <span>
+                      <b>{m.message}</b>
+                      <button className="link why" onClick={() => onWhy(m.id)}>
+                        why?
+                      </button>
+                    </span>
+                    <span className="cause">{m.cause}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       )}
       {trustTick !== null && (
-        <div className="trust-ledger">
-          <div className="small">
-            Trust changes, ticks {trustTick - TRUST_WINDOW}–{trustTick}{" "}
-            <button className="link small" onClick={() => setTrustTick(null)}>
-              hide
+        <div className="callout">
+          <div className="section-header">
+            <span className="label">
+              Trust changes, ticks {trustTick - TRUST_WINDOW}–{trustTick}
+            </span>
+            <button className="ghost small" onClick={() => setTrustTick(null)}>
+              Hide
             </button>
           </div>
-          {trust.length === 0 && <div className="muted small">None.</div>}
-          <ul>
+          {trust.length === 0 && <div className="faint small">None.</div>}
+          <ul className="rows">
             {trust.map((entry, i) => (
               <li key={i}>
-                <span className="event-tick">{entry.tick}</span>
-                <span className={entry.after >= entry.before ? "up" : "down"}>
-                  {formatNumber(entry.before)} → {formatNumber(entry.after)}
-                </span>{" "}
-                with {name(other(entry))}
-                {entry.event && <span className="event-cause"> {entry.event.message}</span>}
-                <button className="link small why" onClick={() => onWhy(entry.event_id)}>
-                  why?
-                </button>
+                <span className="tick">{entry.tick}</span>
+                <span>
+                  <span className={entry.after >= entry.before ? "up" : "down"}>
+                    {formatNumber(entry.before)} → {formatNumber(entry.after)}
+                  </span>{" "}
+                  with {name(other(entry))}
+                  <button className="link why" onClick={() => onWhy(entry.event_id)}>
+                    why?
+                  </button>
+                </span>
+                {entry.event && <span className="cause">{entry.event.message}</span>}
               </li>
             ))}
           </ul>
         </div>
       )}
-    </>
+    </section>
   );
 }
 
@@ -303,17 +344,18 @@ function Relationships({
   const mine = edges.filter((e) => e.source === node.id || e.target === node.id);
   if (mine.length === 0) return null;
   return (
-    <>
+    <section className="panel-section">
       <h3>Relationships</h3>
       {LAYERS.map((layer) => {
         const ofLayer = mine.filter((e) => e.layer === layer).sort((a, b) => b.strength - a.strength);
         if (ofLayer.length === 0) return null;
         return (
           <div key={layer} className="relationship-layer">
-            <div className="layer-name" style={{ color: LAYER_COLORS[layer] }}>
+            <div className="layer-name">
+              <span className="swatch" style={{ background: LAYER_COLORS[layer] }} />
               {layer} ({ofLayer.length})
             </div>
-            <ul>
+            <ul className="rows plain">
               {ofLayer.map((edge) => {
                 const other = edge.source === node.id ? edge.target : edge.source;
                 return (
@@ -322,9 +364,8 @@ function Relationships({
                       {name(other)}
                     </button>
                     {(layer === "social" || layer === "trade") && (
-                      <span className="muted">
-                        {" "}
-                        strength {edge.strength.toFixed(2)}
+                      <span className="faint num">
+                        {edge.strength.toFixed(2)}
                         {edge.trust !== null && ` · trust ${edge.trust.toFixed(2)}`}
                       </span>
                     )}
@@ -335,7 +376,7 @@ function Relationships({
           </div>
         );
       })}
-    </>
+    </section>
   );
 }
 
@@ -360,25 +401,27 @@ function History({
   }, [runId, entityId]);
   const upToCursor = events.filter((e) => e.tick <= cursor).reverse();
   return (
-    <>
+    <section className="panel-section">
       <h3>History</h3>
-      <ol className="history">
+      <ol className="rows">
         {upToCursor.map((event) => (
           <li key={event.id}>
-            <button className="event-tick link" onClick={() => onJump(event.tick)}>
-              Tick {event.tick}
+            <button className="tick link" onClick={() => onJump(event.tick)} title="go to this tick">
+              {event.tick}
             </button>
-            <div>{event.message}</div>
-            {event.cause && <div className="event-cause">{event.cause}</div>}
-            {event.caused_by.length > 0 && (
-              <button className="link small why" onClick={() => onWhy(event.id)}>
-                why?
-              </button>
-            )}
+            <span>
+              {event.message}
+              {event.caused_by.length > 0 && (
+                <button className="link why" onClick={() => onWhy(event.id)}>
+                  why?
+                </button>
+              )}
+            </span>
+            {event.cause && <span className="cause">{event.cause}</span>}
           </li>
         ))}
-        {upToCursor.length === 0 && <li className="muted">Nothing has happened yet.</li>}
+        {upToCursor.length === 0 && <li className="faint">Nothing has happened yet.</li>}
       </ol>
-    </>
+    </section>
   );
 }

@@ -1,4 +1,5 @@
 import { runLabel } from "./format";
+import { LogoIcon } from "./icons";
 import type { RunInfo } from "./types";
 
 export type Tab = "explore" | "experiments";
@@ -14,12 +15,16 @@ interface Props {
   onTab: (tab: Tab) => void;
 }
 
-/** Which run is shown (and which one it is compared with), plus the page tabs. */
+/** The header: page tabs, which run is shown (and which one it is compared with), new runs. */
 export function RunBar({ runs, runA, runB, onSelectA, onSelectB, onNewRun, tab, onTab }: Props) {
   const newestFirst = [...runs].reverse();
   return (
-    <header className="run-bar">
-      <nav className="tabs">
+    <header className="app-header">
+      <div className="brand">
+        <LogoIcon />
+        graphsim
+      </div>
+      <nav className="segmented">
         <button className={tab === "explore" ? "active" : ""} onClick={() => onTab("explore")}>
           Explore
         </button>
@@ -29,8 +34,8 @@ export function RunBar({ runs, runA, runB, onSelectA, onSelectB, onNewRun, tab, 
       </nav>
       {tab === "explore" && (
         <>
-          <label>
-            Run{" "}
+          <label className="run-picker">
+            <span className="label">Run</span>
             <select value={runA ?? ""} onChange={(e) => onSelectA(e.target.value ? Number(e.target.value) : null)}>
               <option value="">choose a run…</option>
               {newestFirst.map((run) => (
@@ -40,10 +45,10 @@ export function RunBar({ runs, runA, runB, onSelectA, onSelectB, onNewRun, tab, 
               ))}
             </select>
           </label>
-          <label>
-            compare with{" "}
+          <label className="run-picker">
+            <span className="label">vs</span>
             <select value={runB ?? ""} onChange={(e) => onSelectB(e.target.value ? Number(e.target.value) : null)}>
-              <option value="">nothing</option>
+              <option value="">no comparison</option>
               {newestFirst
                 .filter((run) => run.id !== runA)
                 .map((run) => (
@@ -53,8 +58,9 @@ export function RunBar({ runs, runA, runB, onSelectA, onSelectB, onNewRun, tab, 
                 ))}
             </select>
           </label>
+          <span className="spacer" />
           <button className="primary" onClick={onNewRun}>
-            New run…
+            New run
           </button>
         </>
       )}

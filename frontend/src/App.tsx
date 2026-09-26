@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { CausalTrail } from "./CausalTrail";
-import { CHART_BACKGROUND } from "./charts/LineChart";
 import { Communities } from "./Communities";
 import { EventFeed } from "./EventFeed";
 import { Experiments } from "./Experiments";
@@ -22,6 +21,8 @@ import { MetricsBar } from "./MetricsBar";
 import { NewRunDialog, type NewRunRequest } from "./NewRunDialog";
 import { Playback } from "./Playback";
 import { RunBar, type Tab } from "./RunBar";
+import { SidePanel, type SideTab } from "./SidePanel";
+import { FIGURE_BACKGROUND, FIGURE_TEXT } from "./theme";
 import { Timeline } from "./Timeline";
 import { LAYERS, type Layer, type RunInfo, type Scenario } from "./types";
 
@@ -34,7 +35,9 @@ export function App() {
   const [runA, setRunA] = useState<number | null>(null);
   const [runB, setRunB] = useState<number | null>(null);
   const [tab, setTab] = useState<Tab>("explore");
-  const [bottomTab, setBottomTab] = useState<"events" | "communities">("events");
+  const [sideTab, setSideTab] = useState<SideTab>("events");
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [timelineOpen, setTimelineOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [community, setCommunity] = useState<number | null>(null);
   const [whyEvent, setWhyEvent] = useState<number | null>(null);
@@ -130,6 +133,27 @@ export function App() {
     if (subject) setSelectedId(subject);
   }
 
+  /** Selecting a node shows it in the side panel's Inspect tab. */
+  function select(id: string | null) {
+    setSelectedId(id);
+    if (id === null) return;
+    setSideTab("inspect");
+    setGroup(null);
+    setWhyEvent(null);
+    setPanelOpen(true);
+  }
+
+  function openGroup(next: Group | null) {
+    setGroup(next);
+    setWhyEvent(null);
+    if (next) setPanelOpen(true);
+  }
+
+  function why(eventId: number) {
+    setWhyEvent(eventId);
+    setPanelOpen(true);
+  }
+
   function selectRunA(id: number | null) {
     setRunA(id);
     setSelectedId(null);
@@ -152,9 +176,9 @@ export function App() {
    * it shows. */
   function graphFigure(runA: RunInfo | undefined, runB: RunInfo | undefined): Figure | null {
     const panels: (Figure & { title?: string })[] = [];
-    const a = graphA.current?.svg({ background: CHART_BACKGROUND });
+    const a = graphA.current?.svg({ background: FIGURE_BACKGROUND });
     if (a) panels.push({ ...a, title: runB && runA ? runLabel(runA) : undefined });
-    const b = runB ? graphB.current?.svg({ background: CHART_BACKGROUND }) : undefined;
+    const b = runB ? graphB.current?.svg({ background: FIGURE_BACKGROUND }) : undefined;
     if (b && runB) panels.push({ ...b, title: runLabel(runB) });
     if (panels.length === 0) return null;
     const modeLabel = COLOR_MODES.find(([m]) => m === colorMode)?.[1] ?? colorMode;
@@ -165,7 +189,7 @@ export function App() {
       runDescription(runA),
       ...(runB ? [runDescription(runB)] : []),
     ].join("\n");
-    return composeFigure(panels, caption, { direction: "across", background: CHART_BACKGROUND, textColor: "#d7dae0" });
+    return composeFigure(panels, caption, { direction: "across", background: FIGURE_BACKGROUND, textColor: FIGURE_TEXT });
   }
 
   async function startRun(request: NewRunRequest, compareWithCurrent: boolean) {
@@ -199,6 +223,41 @@ export function App() {
       else next.add(layer);
       return next;
     });
+  }
+
+  /** A page shown on top of the side panel's tabs: a causal trail, or a community or
+   * organization page (a trail can open on top of a page; "back" returns to it). */
+  function sidePage() {
+    if (runA === null) return null;
+    const tabName = { inspect: "Inspect", events: "Events", communities: "Communities" }[sideTab];
+    if (whyEvent !== null) {
+      return {
+        content: <CausalTrail runId={runA} eventId={whyEvent} onJump={jump} />,
+        backLabel: group ? "Back to the page" : `Back to ${tabName}`,
+        onBack: () => setWhyEvent(null),
+      };
+    }
+    if (group) {
+      return {
+        content: (
+          <GroupPage
+            runId={runA}
+            run={runs.find((r) => r.id === runA)}
+            group={group}
+            lastTick={Math.max(lastTick, 1)}
+            cursor={playback.tick}
+            droughts={droughts}
+            name={name}
+            onJump={(tick) => jump(tick)}
+            onSelect={select}
+            onWhy={why}
+          />
+        ),
+        backLabel: `Back to ${tabName}`,
+        onBack: () => setGroup(null),
+      };
+    }
+    return null;
   }
 
   // --- layout ---
@@ -244,14 +303,16 @@ export function App() {
             playing={playback.playing}
             speed={playback.speed}
             drought={snapshotA?.drought ?? false}
+            droughts={droughts}
             onTick={playback.setTick}
             onPlaying={playback.setPlaying}
             onSpeed={playback.setSpeed}
             visibleLayers={visibleLayers}
             onToggleLayer={toggleLayer}
+            panelOpen={panelOpen}
+            onTogglePanel={() => setPanelOpen(!panelOpen)}
           />
-          {snapshotA ? <MetricsBar snapshot={snapshotA} onSelect={setSelectedId} /> : <div className="metrics-bar" />}
-          <main className="main">
+          <main className={`workspace ${panelOpen ? "" : "panel-closed"}`}>
             <div className={`graphs ${runB !== null ? "compare" : ""}`}>
               <div className="graph-panel">
                 {snapshotA && (
@@ -266,10 +327,9 @@ export function App() {
                     pulses={pulsesA}
                     ego={ego}
                     showHulls={showHulls}
-                    onSelect={setSelectedId}
+                    onSelect={select}
                   />
                 )}
-                {runInfoA && runB !== null && <div className="graph-title">{runLabel(runInfoA)}</div>}
                 <GraphControls
                   colorMode={colorMode}
                   onColorMode={setColorMode}
@@ -286,6 +346,7 @@ export function App() {
                     />
                   }
                 />
+                {runInfoA && runB !== null && <div className="floating graph-title">{runLabel(runInfoA)}</div>}
                 {snapshotA && (
                   <Legend
                     mode={colorMode}
@@ -309,11 +370,11 @@ export function App() {
                       pulses={pulsesB}
                       ego={ego}
                       showHulls={showHulls}
-                      onSelect={setSelectedId}
+                      onSelect={select}
                     />
                   )}
                   {runInfoB && (
-                    <div className="graph-title">
+                    <div className="floating graph-title">
                       {runLabel(runInfoB)}
                       {playback.tick > lastTickB && " (not computed this far yet)"}
                     </div>
@@ -321,93 +382,73 @@ export function App() {
                 </div>
               )}
             </div>
-            {snapshotA && (
-              <Inspector
-                runId={runA}
-                run={runInfoA}
-                name={name}
-                ego={ego}
-                onEgo={setEgo}
-                onOpenGroup={setGroup}
-                snapshot={snapshotA}
-                selectedId={selectedId}
-                lastTick={lastTick}
-                droughts={droughts}
-                stapleGood={stapleGood}
-                onSelect={setSelectedId}
-                onJump={(tick) => jump(tick)}
-                onWhy={setWhyEvent}
+            {panelOpen && (
+              <SidePanel
+                tab={sideTab}
+                onTab={setSideTab}
+                page={sidePage()}
+                content={{
+                  inspect: snapshotA ? (
+                    <Inspector
+                      runId={runA}
+                      run={runInfoA}
+                      name={name}
+                      ego={ego}
+                      onEgo={setEgo}
+                      onOpenGroup={openGroup}
+                      snapshot={snapshotA}
+                      selectedId={selectedId}
+                      lastTick={lastTick}
+                      droughts={droughts}
+                      stapleGood={stapleGood}
+                      onSelect={select}
+                      onJump={(tick) => jump(tick)}
+                      onWhy={why}
+                    />
+                  ) : null,
+                  events: (
+                    <EventFeed
+                      runId={runA}
+                      cursor={playback.tick}
+                      liveIds={liveIds}
+                      onSelect={select}
+                      onJump={(tick) => jump(tick)}
+                      onWhy={why}
+                    />
+                  ),
+                  communities: (
+                    <Communities
+                      runId={runA}
+                      run={runInfoA}
+                      lastTick={Math.max(lastTick, 1)}
+                      cursor={playback.tick}
+                      selected={community}
+                      onSelect={(id, tick) => {
+                        const deselect = id === community;
+                        setCommunity(deselect ? null : id);
+                        openGroup(deselect || id === null ? null : { kind: "community", id });
+                        setSelectedId(null);
+                        jump(tick);
+                      }}
+                    />
+                  ),
+                }}
               />
             )}
           </main>
-          <div className="bottom">
-            <Timeline
-              charts={scenario.timeline}
-              seriesA={a.series}
-              seriesB={runB !== null ? b.series : null}
-              runA={runInfoA}
-              runB={runB !== null ? runInfoB : undefined}
-              lastTick={Math.max(lastTick, 1)}
-              cursor={playback.tick}
-              onPick={(tick) => jump(tick)}
-            />
-            <div className="bottom-right">
-              <nav className="tabs small-tabs">
-                <button className={bottomTab === "events" ? "active" : ""} onClick={() => setBottomTab("events")}>
-                  Events
-                </button>
-                <button
-                  className={bottomTab === "communities" ? "active" : ""}
-                  onClick={() => setBottomTab("communities")}
-                >
-                  Communities
-                </button>
-              </nav>
-              {bottomTab === "events" ? (
-                <EventFeed
-                  runId={runA}
-                  cursor={playback.tick}
-                  liveIds={liveIds}
-                  onSelect={setSelectedId}
-                  onJump={(tick) => jump(tick)}
-                  onWhy={setWhyEvent}
-                />
-              ) : (
-                <Communities
-                  runId={runA}
-                  run={runInfoA}
-                  lastTick={Math.max(lastTick, 1)}
-                  cursor={playback.tick}
-                  selected={community}
-                  onSelect={(id, tick) => {
-                    const deselect = id === community;
-                    setCommunity(deselect ? null : id);
-                    setGroup(deselect || id === null ? null : { kind: "community", id });
-                    setSelectedId(null);
-                    jump(tick);
-                  }}
-                />
-              )}
-            </div>
-          </div>
-          {group && (
-            <GroupPage
-              runId={runA}
-              run={runInfoA}
-              group={group}
-              lastTick={Math.max(lastTick, 1)}
-              cursor={playback.tick}
-              droughts={droughts}
-              name={name}
-              onClose={() => setGroup(null)}
-              onJump={(tick) => jump(tick)}
-              onSelect={setSelectedId}
-              onWhy={setWhyEvent}
-            />
-          )}
-          {whyEvent !== null && (
-            <CausalTrail runId={runA} eventId={whyEvent} onClose={() => setWhyEvent(null)} onJump={jump} />
-          )}
+          <Timeline
+            charts={scenario.timeline}
+            seriesA={a.series}
+            seriesB={runB !== null ? b.series : null}
+            runA={runInfoA}
+            runB={runB !== null ? runInfoB : undefined}
+            lastTick={Math.max(lastTick, 1)}
+            cursor={playback.tick}
+            onPick={(tick) => jump(tick)}
+            summary={<MetricsBar snapshot={snapshotA} onSelect={select} />}
+            open={timelineOpen}
+            onToggle={() => setTimelineOpen(!timelineOpen)}
+          />
         </>
       )}
 
