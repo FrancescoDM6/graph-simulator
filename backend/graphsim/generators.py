@@ -90,8 +90,8 @@ def two_regions(
         raise GeneratorError(f"two_regions: bridges must be between 1 and {n * n}")
     if resources not in ("balanced", "split"):
         raise GeneratorError('two_regions: resources must be "balanced" or "split"')
-    if merchants not in ("bridge_towns", "every_town"):
-        raise GeneratorError('two_regions: merchants must be "bridge_towns" or "every_town"')
+    if merchants not in MERCHANT_RULES:
+        raise GeneratorError(f"two_regions: merchants must be one of {MERCHANT_RULES}")
     west = [Town(TOWN_NAMES[i], (0.2, (i + 1) / (n + 1))) for i in range(n)]
     east = [Town(TOWN_NAMES[n + i], (0.8, (i + 1) / (n + 1))) for i in range(n)]
     kinds = list(layout.site_capacity)
@@ -116,6 +116,9 @@ def two_regions(
     return world_tables(towns, inside + crossings, layout)
 
 
+MERCHANT_RULES = ("bridge_towns", "every_town", "one_side")
+
+
 def place_merchants_two_regions(
     west: list[Town], east: list[Town], crossings: list[tuple[Town, Town]], rule: str
 ) -> list[Town]:
@@ -131,12 +134,14 @@ def place_merchants_two_regions(
     every town), so a sweep over bridges also changes where merchants live.
     "every_town": spread over all towns, whatever the bridges; a bridge sweep then changes roads
     only.
+    "one_side": only at the West ends of the bridges, so one region's merchants hold every
+    crossing (does owning one end of a bridge give the same power as owning both?).
     """
     if rule == "every_town":
         return [*west, *east]
     ends: list[Town] = []
     for w, e in crossings:
-        for town in (w, e):
+        for town in (w,) if rule == "one_side" else (w, e):
             if town not in ends:
                 ends.append(town)
     return sorted(ends, key=lambda t: t in east)  # West before East, keeping bridge order

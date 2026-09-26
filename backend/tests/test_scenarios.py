@@ -83,6 +83,7 @@ def test_merchants_live_at_the_bridges_or_in_every_town():
     assert sorted(merchant_towns(3, "bridge_towns").values()) == [1, 1, 1, 1]
     for bridges in (1, 3):
         assert sorted(merchant_towns(bridges, "every_town").values()) == [1, 1, 1, 1]
+    assert list(merchant_towns(1, "one_side").values()) == [4]  # all at the West end
 
 
 def test_split_resources_put_every_farm_in_the_west():

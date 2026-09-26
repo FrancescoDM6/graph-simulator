@@ -9,5 +9,5 @@ description = "Two tightly knit regions, each with farms and mines, joined by a 
 name = "two_regions"
 towns_per_region = 2
 bridges = 1
-merchants = "bridge_towns"  # or "every_town" (see generators.place_merchants_two_regions)
+merchants = "bridge_towns"  # or "every_town", "one_side" (generators.place_merchants_two_regions)
 resources = "balanced"
