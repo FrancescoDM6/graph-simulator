@@ -78,21 +78,21 @@ export function withMetadata(figure: Figure, title: string, description: string)
   return { ...figure, svg: figure.svg.replace(/(<svg[^>]*>)/, `$1${meta}`) };
 }
 
-/** "run 834 (seed 4, variant no_gifting, 800 ticks, code 530ac6c, config 1a4b9c36...)" */
+/** "run 834 (world three_towns, seed 4, variant no_gifting, 800 ticks, code 530ac6c, config 1a4b…)" */
 export function runDescription(run: RunInfo | undefined): string {
   if (!run) return "";
   const overrides = Object.entries(run.overrides)
     .map(([k, v]) => `${k}=${v}`)
     .join(", ");
   return (
-    `run ${run.id} (seed ${run.seed}, variant ${run.variant}${overrides ? `, ${overrides}` : ""}, ` +
+    `run ${run.id} (world ${run.scenario}, seed ${run.seed}, variant ${run.variant}${overrides ? `, ${overrides}` : ""}, ` +
     `${run.ticks} ticks, code ${run.code_version}, config ${run.config_hash})`
   );
 }
 
-/** "run834_seed4_no_gifting_t250" */
+/** "run834_three_towns_seed4_no_gifting_t250" */
 export function fileStem(run: RunInfo | undefined, ...parts: (string | number | undefined)[]): string {
-  const base = run ? [`run${run.id}`, `seed${run.seed}`, run.variant] : [];
+  const base = run ? [`run${run.id}`, run.scenario, `seed${run.seed}`, run.variant] : [];
   return [...base, ...parts.filter((p) => p !== undefined && p !== "")]
     .join("_")
     .replace(/[^A-Za-z0-9_.-]+/g, "-");

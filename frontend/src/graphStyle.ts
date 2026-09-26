@@ -119,7 +119,15 @@ export function nodeData(node: GraphNode, coloring: Coloring): Record<string, st
         community: node.community,
       };
     case "town":
-      return { id: node.id, kind: node.kind, label: node.name, size: 40, fill: "#161a20", border: "#4b5563" };
+      return {
+        id: node.id,
+        kind: node.kind,
+        label: node.name,
+        size: 40,
+        fill: "#161a20",
+        border: "#4b5563",
+        mapped: node.position ? 1 : 0, // placed by the world's map (GraphView keeps it there)
+      };
     case "site":
       return {
         id: node.id,

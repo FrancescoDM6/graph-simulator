@@ -34,6 +34,7 @@ export interface PhenomenonSpec {
 
 export interface Scenario {
   name: string;
+  default_scenario: string; // the world used unless another is chosen (scenarios/<name>.toml)
   seed: number;
   ticks: number;
   goods: Record<string, GoodSpec>;
@@ -41,9 +42,29 @@ export interface Scenario {
   mechanisms: Record<string, boolean | string>;
   mechanism_choices: Record<string, string[]>;
   variants: Record<string, string>; // name -> description
-  experiments: Record<string, { description: string; seeds: number; variants: string[]; ticks: number }>;
+  experiments: Record<
+    string,
+    { description: string; seeds: number; scenarios: string[]; variants: string[]; ticks: number }
+  >;
   phenomena: Record<string, PhenomenonSpec>;
   timeline: TimelineSeries[];
+}
+
+/** A world from scenarios/: its map as built (generated ones included), totals and shape. */
+export interface WorldInfo {
+  name: string;
+  title: string;
+  description: string;
+  generator: Record<string, string | number> | null; // null: a written-out map
+  towns: {
+    name: string;
+    position: [number, number]; // 0..1 across and down
+    sites: { name: string; kind: string; scale: number }[];
+    founding: Record<string, number>;
+  }[];
+  roads: { from: string; to: string }[];
+  summary: Record<string, number | string>; // people, people.<occupation>, towns, roads, diameter…
+  variants: string[]; // the variants that can run in this world
 }
 
 // --- runs -------------------------------------------------------------------------------------
@@ -51,6 +72,7 @@ export interface Scenario {
 export interface RunInfo {
   id: number;
   created: string;
+  scenario: string; // the world (scenarios/<name>.toml)
   variant: string;
   overrides: Record<string, unknown>;
   seed: number;
@@ -89,6 +111,7 @@ export interface TownNode {
   kind: "town";
   name: string;
   residents: number;
+  position?: [number, number]; // on the world's map, 0..1 (missing in runs from before scenarios)
 }
 
 export interface SiteNode {

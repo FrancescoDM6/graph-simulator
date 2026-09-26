@@ -2,7 +2,7 @@ import { runLabel } from "./format";
 import { LogoIcon } from "./icons";
 import type { RunInfo } from "./types";
 
-export type Tab = "explore" | "experiments";
+export type Tab = "explore" | "scenarios" | "experiments";
 
 interface Props {
   runs: RunInfo[]; // full-detail runs the viewer can play
@@ -27,6 +27,9 @@ export function RunBar({ runs, runA, runB, onSelectA, onSelectB, onNewRun, tab, 
       <nav className="segmented">
         <button className={tab === "explore" ? "active" : ""} onClick={() => onTab("explore")}>
           Explore
+        </button>
+        <button className={tab === "scenarios" ? "active" : ""} onClick={() => onTab("scenarios")}>
+          Scenarios
         </button>
         <button className={tab === "experiments" ? "active" : ""} onClick={() => onTab("experiments")}>
           Experiments

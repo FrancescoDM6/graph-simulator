@@ -23,7 +23,8 @@ cytoscape.use(cytoscapeSvg);
 const LAYOUT_MIN_INTERVAL_MS = 1500;
 const LAYOUT_ANIMATION_MS = 700;
 const NEW_NODE_JITTER = 40; // new nodes appear next to a neighbour, offset by up to this much
-const TOWN_RING_RADIUS = 320; // towns start evenly spaced on a circle this big
+const TOWN_RING_RADIUS = 320; // without a map position, towns start on a circle this big
+const MAP_SIZE = { width: 1000, height: 700 }; // a map position (0..1) spans this many units
 const PULSE_MS = 650; // how long an event highlight stays on
 const HULL_PADDING = 12; // space between a community's nodes and its outline
 const FIT_PADDING = 36; // space between the graph and the edge of its panel
@@ -396,11 +397,16 @@ function syncElements(cy: cytoscape.Core, snapshot: Snapshot, coloring: Coloring
 }
 
 /** A starting layout that depends only on the snapshot, so two panels showing runs with the same
- * seed start out looking the same: towns on a circle, everything else near its town. */
+ * seed start out looking the same: towns where the world's map puts them (or on a circle, for
+ * runs from before maps had positions), everything else near its town. */
 function placeDeterministically(cy: cytoscape.Core, snapshot: Snapshot) {
   const towns = snapshot.nodes.filter((n) => n.kind === "town");
   const townPosition = new Map(
     towns.map((town, i) => {
+      if (town.position) {
+        const [x, y] = town.position;
+        return [town.id, { x: (x - 0.5) * MAP_SIZE.width, y: (y - 0.5) * MAP_SIZE.height }];
+      }
       const angle = (2 * Math.PI * i) / Math.max(1, towns.length) - Math.PI / 2;
       return [town.id, { x: TOWN_RING_RADIUS * Math.cos(angle), y: TOWN_RING_RADIUS * Math.sin(angle) }];
     }),
@@ -454,11 +460,12 @@ function runLayout(
   { first }: { first: boolean },
 ) {
   layoutRef.current?.stop();
-  // After the first placement, towns and sites stay where they are: they are fixed landmarks
-  // that stop the whole picture from rotating or drifting as agents rearrange around them.
-  const landmarks = first
-    ? undefined
-    : cy.nodes('[kind = "town"], [kind = "site"]').map((n) => ({ nodeId: n.id(), position: { ...n.position() } }));
+  // Towns and sites are fixed landmarks that stop the whole picture from rotating or drifting as
+  // agents rearrange around them. Towns placed by the world's map stay there from the start (so
+  // the graph keeps the map's shape); other landmarks settle in the first layout, then stay.
+  const fixed = first ? '[kind = "town"][mapped = 1]' : '[kind = "town"], [kind = "site"]';
+  const pinned = cy.nodes(fixed).map((n) => ({ nodeId: n.id(), position: { ...n.position() } }));
+  const landmarks = pinned.length ? pinned : undefined;
   const options = {
     name: "fcose",
     quality: "proof", // required by fcose when starting from existing positions

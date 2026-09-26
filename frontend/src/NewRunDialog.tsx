@@ -1,32 +1,48 @@
 import { useState } from "react";
-import type { Scenario } from "./types";
+import type { Scenario, WorldInfo } from "./types";
 
 export interface NewRunRequest {
   seed: number;
   ticks: number;
+  scenario: string; // the world (scenarios/<name>.toml)
   variant: string;
-  overrides: Record<string, unknown>;
+  overrides: Record<string, unknown>; // mechanism switches, generator.<param> values
   label: string;
 }
 
 interface Props {
   scenario: Scenario;
-  seed: number; // defaults: usually the run currently shown, so "same seed, one change" is easy
+  worlds: WorldInfo[];
+  world: string; // defaults: usually the run currently shown, so "same seed, one change" is easy
+  seed: number;
   ticks: number;
+  canCompare: boolean; // whether a run is open to compare with
   onCancel: () => void;
   onStart: (request: NewRunRequest, compareWithCurrent: boolean) => void;
 }
 
 const AS_VARIANT = ""; // mechanism left as the chosen variant (and scenario.toml) set it
 
-/** Start a new stored run: a seed, a variant from scenario.toml, and optional switches. */
-export function NewRunDialog({ scenario, seed, ticks, onCancel, onStart }: Props) {
+/** Start a new stored run: a world, a seed, a variant from scenario.toml, the world's generator
+ * parameters (for generated worlds) and optional switches. */
+export function NewRunDialog({ scenario, worlds, world, seed, ticks, canCompare, onCancel, onStart }: Props) {
+  const [worldName, setWorldName] = useState(world);
+  const [params, setParams] = useState<Record<string, string>>(defaultParams(worlds, world));
   const [seedText, setSeedText] = useState(String(seed));
   const [ticksText, setTicksText] = useState(String(ticks));
   const [variant, setVariant] = useState("baseline");
   const [mechanisms, setMechanisms] = useState<Record<string, string>>({});
   const [label, setLabel] = useState("");
-  const [compare, setCompare] = useState(true);
+  const [compare, setCompare] = useState(canCompare);
+  const chosen = worlds.find((w) => w.name === worldName);
+  const variants = Object.entries(scenario.variants).filter(([name]) => chosen?.variants.includes(name) ?? true);
+
+  function chooseWorld(name: string) {
+    setWorldName(name);
+    setParams(defaultParams(worlds, name));
+    const allowed = worlds.find((w) => w.name === name)?.variants ?? [];
+    if (!allowed.includes(variant)) setVariant("baseline");
+  }
 
   function start() {
     const overrides: Record<string, unknown> = {};
@@ -34,7 +50,15 @@ export function NewRunDialog({ scenario, seed, ticks, onCancel, onStart }: Props
       if (value === AS_VARIANT) continue;
       overrides[`mechanisms.${name}`] = value === "true" ? true : value === "false" ? false : value;
     }
-    onStart({ seed: Number(seedText), ticks: Number(ticksText), variant, overrides, label }, compare);
+    // Only parameters that differ from the world's own go into the run's overrides.
+    for (const [key, value] of Object.entries(chosen?.generator ?? {})) {
+      if (key === "name" || params[key] === String(value)) continue;
+      overrides[`generator.${key}`] = typeof value === "number" ? Number(params[key]) : params[key];
+    }
+    onStart(
+      { seed: Number(seedText), ticks: Number(ticksText), scenario: worldName, variant, overrides, label },
+      compare && canCompare,
+    );
   }
 
   return (
@@ -45,6 +69,37 @@ export function NewRunDialog({ scenario, seed, ticks, onCancel, onStart }: Props
           <p>Computed on the server and stored; it plays while it computes.</p>
         </div>
         <div className="dialog-body">
+          <label className="field">
+            <span>World</span>
+            <select value={worldName} onChange={(e) => chooseWorld(e.target.value)}>
+              {worlds.map((w) => (
+                <option key={w.name} value={w.name}>
+                  {w.title} — {w.description}
+                </option>
+              ))}
+            </select>
+          </label>
+          {chosen?.generator && (
+            <div className="field">
+              <span>
+                Map parameters (generator <code>{String(chosen.generator.name)}</code>)
+              </span>
+              <div className="mechanism-grid">
+                {Object.keys(chosen.generator)
+                  .filter((key) => key !== "name")
+                  .map((key) => (
+                    <label key={key}>
+                      {key}
+                      <input
+                        aria-label={key}
+                        value={params[key] ?? ""}
+                        onChange={(e) => setParams({ ...params, [key]: e.target.value })}
+                      />
+                    </label>
+                  ))}
+              </div>
+            </div>
+          )}
           <div className="field-row">
             <label className="field">
               <span>Seed</span>
@@ -58,7 +113,7 @@ export function NewRunDialog({ scenario, seed, ticks, onCancel, onStart }: Props
           <label className="field">
             <span>Variant</span>
             <select value={variant} onChange={(e) => setVariant(e.target.value)}>
-              {Object.entries(scenario.variants).map(([name, description]) => (
+              {variants.map(([name, description]) => (
                 <option key={name} value={name}>
                   {name} — {description}
                 </option>
@@ -98,7 +153,12 @@ export function NewRunDialog({ scenario, seed, ticks, onCancel, onStart }: Props
         </div>
         <div className="dialog-foot">
           <label className="check">
-            <input type="checkbox" checked={compare} onChange={(e) => setCompare(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={compare && canCompare}
+              disabled={!canCompare}
+              onChange={(e) => setCompare(e.target.checked)}
+            />
             open it next to the current run
           </label>
           <div className="buttons">
@@ -113,4 +173,10 @@ export function NewRunDialog({ scenario, seed, ticks, onCancel, onStart }: Props
       </div>
     </div>
   );
+}
+
+/** A world's generator parameters as editable text (empty for written-out maps). */
+function defaultParams(worlds: WorldInfo[], name: string): Record<string, string> {
+  const generator = worlds.find((w) => w.name === name)?.generator ?? {};
+  return Object.fromEntries(Object.entries(generator).map(([key, value]) => [key, String(value)]));
 }

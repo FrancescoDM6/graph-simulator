@@ -1502,6 +1502,121 @@ li.empty-state {
   color: var(--text-2);
 }
 
+/* --- Scenarios page ----------------------------------------------------------------------------- */
+
+.world-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+}
+
+.world-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.world-card .card-head {
+  margin-bottom: 0;
+}
+
+.world-description {
+  margin: 0;
+}
+
+.world-map {
+  border-radius: var(--radius-m);
+  background-color: var(--bg-0);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.map-road {
+  stroke: #4b5563;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.map-town {
+  fill: #161a20;
+  stroke: #6b7280;
+  stroke-width: 1.5;
+}
+
+.map-site {
+  fill: #1f242c;
+  stroke-width: 1.5;
+}
+
+.map-count {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-label {
+  fill: var(--text-2);
+  font-size: 10px;
+}
+
+.world-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.world-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.phenomena-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.phenomena-grid th {
+  padding: 4px 8px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.phenomena-grid tbody th {
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.phenomena-grid td {
+  padding: 7px 8px;
+  border-radius: 4px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.phenomena-grid td:hover {
+  outline: 1px solid var(--text-2);
+}
+
+.phenomena-grid .extra {
+  color: var(--text-2);
+  background: transparent;
+}
+
 .threshold-chip {
   padding: 2px 8px;
   border-radius: 10px;

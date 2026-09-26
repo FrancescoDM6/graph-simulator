@@ -21,10 +21,11 @@ import { MetricsBar } from "./MetricsBar";
 import { NewRunDialog, type NewRunRequest } from "./NewRunDialog";
 import { Playback } from "./Playback";
 import { RunBar, type Tab } from "./RunBar";
+import { Scenarios } from "./Scenarios";
 import { SidePanel, type SideTab } from "./SidePanel";
 import { FIGURE_BACKGROUND, FIGURE_TEXT } from "./theme";
 import { Timeline } from "./Timeline";
-import { LAYERS, type Layer, type RunInfo, type Scenario } from "./types";
+import { LAYERS, type Layer, type RunInfo, type Scenario, type WorldInfo } from "./types";
 
 const RUN_LIST_REFRESH_MS = 3000; // while any run is still computing
 const TOWN_COLORS = ["#e15759", "#4e79a7", "#59a14f", "#f28e2b", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7"];
@@ -42,7 +43,9 @@ export function App() {
   const [community, setCommunity] = useState<number | null>(null);
   const [whyEvent, setWhyEvent] = useState<number | null>(null);
   const [visibleLayers, setVisibleLayers] = useState<Set<Layer>>(new Set(LAYERS));
-  const [newRunOpen, setNewRunOpen] = useState(false);
+  const [newRunWorld, setNewRunWorld] = useState<string | null>(null); // the New run dialog, for this world
+  const [worlds, setWorlds] = useState<WorldInfo[]>([]);
+  const [experimentName, setExperimentName] = useState<string | null>(null); // opened from Scenarios
   const [error, setError] = useState("");
   // Graph display options
   const [colorMode, setColorMode] = useState<ColorMode>("community");
@@ -58,6 +61,7 @@ export function App() {
 
   useEffect(() => {
     api.scenario().then(setScenario, (e) => setError(`Can't reach the server on port 8000 (${e})`));
+    api.worlds().then(setWorlds, (e) => setError(`Can't read the scenarios (${e})`));
   }, []);
 
   const refreshRuns = useCallback(async () => {
@@ -193,7 +197,7 @@ export function App() {
   }
 
   async function startRun(request: NewRunRequest, compareWithCurrent: boolean) {
-    setNewRunOpen(false);
+    setNewRunWorld(null);
     try {
       const run = await api.startRun(request);
       await refreshRuns();
@@ -276,7 +280,7 @@ export function App() {
         runB={runB}
         onSelectA={selectRunA}
         onSelectB={setRunB}
-        onNewRun={() => setNewRunOpen(true)}
+        onNewRun={() => setNewRunWorld(runInfoA?.scenario ?? scenario.default_scenario)}
         tab={tab}
         onTab={setTab}
       />
@@ -286,7 +290,27 @@ export function App() {
         </div>
       )}
 
-      {tab === "experiments" && <Experiments scenario={scenario} onOpenRun={openRun} />}
+      {tab === "experiments" && (
+        <Experiments key={experimentName} scenario={scenario} initial={experimentName} onOpenRun={openRun} />
+      )}
+
+      {tab === "scenarios" && (
+        <Scenarios
+          scenario={scenario}
+          worlds={worlds}
+          runs={runs}
+          onRun={setNewRunWorld}
+          onOpenRun={(id) => {
+            selectRunA(id);
+            setRunB(null);
+            setTab("explore");
+          }}
+          onOpenExperiment={(name) => {
+            setExperimentName(name);
+            setTab("experiments");
+          }}
+        />
+      )}
 
       {tab === "explore" && runA === null && (
         <div className="empty">
@@ -452,13 +476,19 @@ export function App() {
         </>
       )}
 
-      {newRunOpen && (
+      {newRunWorld !== null && (
         <NewRunDialog
           scenario={scenario}
+          worlds={worlds}
+          world={newRunWorld}
           seed={runInfoA?.seed ?? scenario.seed}
           ticks={runInfoA?.ticks ?? scenario.ticks}
-          onCancel={() => setNewRunOpen(false)}
-          onStart={startRun}
+          canCompare={runA !== null && tab === "explore"}
+          onCancel={() => setNewRunWorld(null)}
+          onStart={async (request, compare) => {
+            await startRun(request, compare);
+            setTab("explore");
+          }}
         />
       )}
     </div>

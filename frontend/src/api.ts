@@ -10,6 +10,7 @@ import type {
   RunInfo,
   Scenario,
   Series,
+  WorldInfo,
   SimEvent,
   Snapshot,
   TrailNode,
@@ -41,10 +42,17 @@ async function post<T>(path: string, body?: unknown) {
 
 export const api = {
   scenario: () => get<Scenario>("/scenario"),
+  worlds: () => get<WorldInfo[]>("/scenarios"),
   runs: () => get<RunInfo[]>("/runs"),
   run: (id: number) => get<RunInfo>(`/runs/${id}`),
-  startRun: (request: { seed: number; ticks: number; variant: string; overrides: Record<string, unknown>; label: string }) =>
-    post<RunInfo>("/runs", request),
+  startRun: (request: {
+    seed: number;
+    ticks: number;
+    scenario: string;
+    variant: string;
+    overrides: Record<string, unknown>; // may include generator.<param>
+    label: string;
+  }) => post<RunInfo>("/runs", request),
   materialize: (id: number) => post<RunInfo>(`/runs/${id}/materialize`),
   metrics: (id: number, names: string[]) =>
     get<{ names: string[]; series: Record<string, Series> }>(`/runs/${id}/metrics`, { names: names.join(",") }),

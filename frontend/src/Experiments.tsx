@@ -5,15 +5,16 @@ import type { ExperimentReport, Scenario } from "./types";
 
 interface Props {
   scenario: Scenario;
+  initial?: string | null; // the experiment to show first (default: the first in scenario.toml)
   onOpenRun: (runId: number) => void; // opens a run in Explore (computing full detail if needed)
 }
 
 /** Results of an experiment from scenario.toml: for each phenomenon, the distribution of its
  * measure across seeds per variant, how often it is present, and the change from the baseline
  * paired by seed. Run experiments with `python -m graphsim.experiment <name>`. */
-export function Experiments({ scenario, onOpenRun }: Props) {
+export function Experiments({ scenario, initial, onOpenRun }: Props) {
   const names = Object.keys(scenario.experiments);
-  const [name, setName] = useState(names[0] ?? "");
+  const [name, setName] = useState(initial && names.includes(initial) ? initial : (names[0] ?? ""));
   const [report, setReport] = useState<ExperimentReport | null>(null);
   const [extraMeasure, setExtraMeasure] = useState("");
   const [error, setError] = useState("");
@@ -88,7 +89,8 @@ export function Experiments({ scenario, onOpenRun }: Props) {
             <p className="experiments-intro small">
               {report.runs.length} runs. Each dot is one seed (click it to open that world); the white tick is the
               median, hollow dots are worlds without the phenomenon. Right: share of worlds showing it [95% interval],
-              then the median change from {report.baseline} for the same seed (share of seeds changing that way).
+              then the median change from {report.baseline ?? "the same world's baseline"} for the same seed (share of
+              seeds changing that way; different worlds are compared by their dots, never paired).
             </p>
             {Object.entries(scenario.phenomena).map(([phenomenon, p]) => (
               <section key={phenomenon} className="card">
