@@ -1,8 +1,15 @@
 # Python
 __pycache__/
+*.py[cod]
 .venv/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+.claude/
 
 # Simulation output (the run database)
 runs/
@@ -11,3 +18,16 @@ backend/runs/
 # Frontend
 node_modules/
 frontend/dist/
+.vite/
+npm-debug.log*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
