@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from graphsim import analysis, report, runner, storage
 from graphsim.communities import entity_id
 from graphsim.config import PARTNER_CHOICE, SOCIAL_DYNAMICS, ScenarioError, load_scenario
+from graphsim.scenarios import world_summary
 
 app = FastAPI(title="graphsim")
 DATABASE = load_scenario().database
@@ -45,6 +46,7 @@ def scenario_info() -> dict[str, Any]:
     cfg = scenario.config()
     return {
         "name": scenario.name,
+        "default_scenario": scenario.default_scenario,
         "seed": scenario.seed,
         "ticks": scenario.ticks,
         "goods": {name: asdict(spec) for name, spec in cfg.goods.items()},
@@ -61,6 +63,7 @@ def scenario_info() -> dict[str, Any]:
             name: {
                 "description": spec.description,
                 "seeds": len(spec.seeds),
+                "scenarios": spec.scenarios,
                 "variants": spec.variants,
                 "ticks": spec.ticks,
             }
@@ -71,14 +74,55 @@ def scenario_info() -> dict[str, Any]:
     }
 
 
+@app.get("/api/scenarios")
+def scenarios() -> list[dict[str, Any]]:
+    """Every world in scenarios/: what it is, its map (as built, for generated ones), its
+    totals and shape, and which variants can run on it."""
+    scenario = load_scenario()
+    result = []
+    for name, spec in scenario.scenarios.items():
+        cfg = scenario.config(scenario=name)
+        result.append(
+            {
+                "name": name,
+                "title": spec.title,
+                "description": spec.description,
+                "generator": spec.generator,
+                "towns": [
+                    {
+                        "name": town_name,
+                        "position": list(town.position),
+                        "sites": [asdict(site) for site in town.sites],
+                        "founding": town.founding,
+                    }
+                    for town_name, town in cfg.world.towns.items()
+                ],
+                "roads": [{"from": road.from_, "to": road.to} for road in cfg.world.roads],
+                "summary": world_summary(cfg),
+                "variants": [v for v in scenario.variants if _runs_on(scenario, v, name)],
+            }
+        )
+    default = scenario.default_scenario
+    return sorted(result, key=lambda s: (s["name"] != default, s["name"]))
+
+
+def _runs_on(scenario, variant: str, world: str) -> bool:
+    try:
+        scenario.config(variant, scenario=world)
+    except ScenarioError:
+        return False  # e.g. a variant that names another map's towns
+    return True
+
+
 # --- runs -------------------------------------------------------------------------------------
 
 
 class NewRun(BaseModel):
     seed: int
     ticks: int
+    scenario: str | None = None  # a world in scenarios/; default: scenario.toml [run] scenario
     variant: str = "baseline"
-    overrides: dict[str, Any] = {}
+    overrides: dict[str, Any] = {}  # may include generator.<param> for generated worlds
     label: str = ""
 
 
@@ -101,6 +145,7 @@ def start_run(conn: Db, request: NewRun) -> dict[str, Any]:
             overrides=request.overrides,
             level="full",
             label=request.label,
+            scenario_name=request.scenario,
         )
     except ScenarioError as error:
         raise HTTPException(400, str(error)) from error
@@ -122,8 +167,9 @@ def materialize(conn: Db, run_id: int) -> dict[str, Any]:
         return info
     scenario = load_scenario()
     try:
-        if scenario.config(info["variant"], info["overrides"]).config_hash() != info["config_hash"]:
-            raise HTTPException(409, "scenario.toml has changed since this run was made")
+        settings = scenario.config(info["variant"], info["overrides"], scenario=info["scenario"])
+        if settings.config_hash() != info["config_hash"]:
+            raise HTTPException(409, "the scenario files have changed since this run was made")
         full_id, done = runner.prepare(
             conn,
             scenario,
@@ -134,6 +180,7 @@ def materialize(conn: Db, run_id: int) -> dict[str, Any]:
             level="full",
             experiment=info["experiment"],
             label=info["label"],
+            scenario_name=info["scenario"],
         )
     except ScenarioError as error:
         raise HTTPException(400, str(error)) from error

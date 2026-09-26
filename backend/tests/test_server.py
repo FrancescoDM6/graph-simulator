@@ -114,3 +114,34 @@ def test_ledger_community_and_org_pages(client):
         org_id = founded[0]["subjects"][1]
         org = client.get(f"/api/runs/{run_id}/orgs/{org_id}").json()
         assert org["history"] and org["events"]
+
+
+def test_scenarios_list_every_world_with_its_map(client):
+    worlds = client.get("/api/scenarios").json()
+    names = [w["name"] for w in worlds]
+    assert names[0] == "three_towns"  # the default first
+    assert {"hub_and_spokes", "two_regions", "isolated_villages"} <= set(names)
+    hub = next(w for w in worlds if w["name"] == "hub_and_spokes")
+    assert hub["generator"]["spokes"] == 4 and len(hub["towns"]) == 5 and len(hub["roads"]) == 4
+    assert hub["summary"]["people"] == 33
+    assert "no_gifting" in hub["variants"]
+    assert "no_merchants_equal_population" not in hub["variants"]  # names three_towns' towns
+
+
+def test_a_run_in_a_generated_world_with_changed_parameters(client):
+    started = client.post(
+        "/api/runs",
+        json={
+            "seed": 1,
+            "ticks": 20,
+            "scenario": "two_regions",
+            "overrides": {"generator.bridges": 2},
+        },
+    ).json()
+    run = wait_until_done(client, started["id"])
+    assert run["scenario"] == "two_regions" and run["status"] == "done"
+    nodes = client.get(f"/api/runs/{run['id']}/snapshots", params={"first": 1}).json()[0]["nodes"]
+    towns = [n for n in nodes if n["kind"] == "town"]
+    assert len(towns) == 4 and all(len(t["position"]) == 2 for t in towns)
+    bad = client.post("/api/runs", json={"seed": 1, "ticks": 5, "scenario": "atlantis"})
+    assert bad.status_code == 400

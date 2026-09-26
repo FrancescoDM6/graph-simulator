@@ -119,3 +119,12 @@ def test_community_and_org_histories_include_internal_stats(scenario):
     assert org_ids, "seed 1 founds an organization within 400 ticks"
     org_rows = storage.org_history(conn, run_id, org_ids[0]["org_id"])
     assert all(row["size"] == len(row["members"]) for row in org_rows)
+
+
+def test_runs_from_before_scenarios_are_named_three_towns(scenario):
+    conn = storage.connect(scenario.database)
+    run_id = runner.run(scenario, seed=1, ticks=5, level="summary")
+    assert storage.get_run(conn, run_id)["scenario"] == "three_towns"
+    conn.execute("update runs set scenario = 'scenario' where id = ?", (run_id,))
+    storage._name_old_worlds(conn)
+    assert storage.get_run(conn, run_id)["scenario"] == "three_towns"

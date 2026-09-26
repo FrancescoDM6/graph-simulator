@@ -149,6 +149,7 @@ def connect(path: Path | str) -> sqlite3.Connection:
             conn.execute("pragma journal_mode = wal")  # readers aren't blocked by a writer
         conn.executescript(SCHEMA)
         _add_missing_columns(conn)
+        _name_old_worlds(conn)
         _prepared.add(path)
     return conn
 
@@ -160,6 +161,13 @@ ADDED_COLUMNS = [
     ("community_ticks", "trust", "real"),
     ("community_ticks", "trade", "real"),
 ]
+
+
+def _name_old_worlds(conn: sqlite3.Connection) -> None:
+    """Runs made before scenarios/ existed stored the settings file's name ("scenario") where
+    the world's name now goes; they all ran on the map now called three_towns."""
+    with conn:
+        conn.execute("update runs set scenario = 'three_towns' where scenario = 'scenario'")
 
 
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
@@ -460,9 +468,9 @@ def community_members(conn: sqlite3.Connection, run_id: int, tick: int) -> dict[
 
 
 def experiment_runs(conn: sqlite3.Connection, experiment: str) -> list[dict[str, Any]]:
-    """(label, seed, run_id) for every job of the experiment that has a finished run."""
+    """(label, seed, run_id, scenario) for every job of the experiment with a finished run."""
     rows = conn.execute(
-        """select x.label, x.seed, x.run_id from experiment_runs x
+        """select x.label, x.seed, x.run_id, r.scenario from experiment_runs x
            join runs r on r.id = x.run_id
            where x.experiment = ? and r.status = 'done' order by x.label, x.seed""",
         (experiment,),

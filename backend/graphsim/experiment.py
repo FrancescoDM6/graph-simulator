@@ -28,26 +28,32 @@ from graphsim.config import Scenario, load_scenario, parse_seeds
 
 @dataclass(frozen=True)
 class Job:
-    label: str  # the variant name, plus any swept values, e.g. "baseline[trade.min_amount=0.2]"
+    # The variant, plus any swept values, e.g. "baseline[trade.min_amount=0.2]"; prefixed with
+    # the world when an experiment compares several, e.g. "hub_and_spokes/baseline".
+    label: str
+    scenario: str
     variant: str
     overrides: tuple[tuple[str, Any], ...]
     seed: int
 
 
 def plan(scenario: Scenario, name: str, seeds: list[int] | None = None) -> list[Job]:
-    """Every job of the experiment: each variant (times each swept combination) times each seed."""
+    """Every job of the experiment: each world, times each variant, times each swept
+    combination, times each seed."""
     experiment = scenario.experiments[name]
     sweep_keys = list(experiment.sweep)
     combinations = list(itertools.product(*experiment.sweep.values())) or [()]
+    several_worlds = len(experiment.scenarios) > 1
     jobs = []
-    for variant in experiment.variants:
-        for values in combinations:
-            overrides = tuple(zip(sweep_keys, values, strict=True))
-            label = variant + (
-                "[" + ", ".join(f"{k}={v}" for k, v in overrides) + "]" if overrides else ""
-            )
-            for seed in seeds or experiment.seeds:
-                jobs.append(Job(label, variant, overrides, seed))
+    for world in experiment.scenarios:
+        for variant in experiment.variants:
+            for values in combinations:
+                overrides = tuple(zip(sweep_keys, values, strict=True))
+                label = (f"{world}/" if several_worlds else "") + variant
+                if overrides:
+                    label += "[" + ", ".join(f"{k}={v}" for k, v in overrides) + "]"
+                for seed in seeds or experiment.seeds:
+                    jobs.append(Job(label, world, variant, overrides, seed))
     return jobs
 
 
@@ -75,6 +81,7 @@ def run_experiment(
             level=experiment.level,
             experiment=name,
             label=job.label,
+            scenario_name=job.scenario,
         )
         storage.assign_experiment_run(conn, name, job.label, job.seed, run_id)
         if not done:
@@ -105,7 +112,7 @@ def run_experiment(
 def _compute(scenario_path: str, job: Job, ticks: int, level: str) -> list[storage.Batch]:
     """Runs in a worker process: the whole simulation, returned as rows to store."""
     scenario = load_scenario(scenario_path)
-    cfg = scenario.config(job.variant, dict(job.overrides))
+    cfg = scenario.config(job.variant, dict(job.overrides), scenario=job.scenario)
     return list(runner.simulate(cfg, job.seed, ticks, scenario.recording[level]))
 
 

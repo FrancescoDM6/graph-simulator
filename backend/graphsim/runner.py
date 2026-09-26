@@ -1,6 +1,7 @@
 """Computing runs: build a world, step it, record it, store it.
 
     run_id = run(scenario, seed=4, ticks=2000, variant="no_gifting")   # stored in the database
+    run_id = run(scenario, seed=4, ticks=2000, scenario_name="hub_and_spokes")
 
 A run is identified by its settings (config hash), seed, length and the code version. Asking
 for a run that already exists returns the stored one instead of recomputing it, and new runs
@@ -48,11 +49,23 @@ def run(
     experiment: str = "",
     label: str = "",
     reuse: bool = True,
+    scenario_name: str | None = None,
 ) -> int:
-    """Computes a run (or finds an identical stored one) and returns its id."""
+    """Computes a run (or finds an identical stored one) and returns its id. `scenario_name`
+    picks the world from scenarios/ (default: scenario.toml [run] scenario)."""
     conn = storage.connect(scenario.database)
     run_id, done = prepare(
-        conn, scenario, seed, ticks, variant, overrides, level, experiment, label, reuse
+        conn,
+        scenario,
+        seed,
+        ticks,
+        variant,
+        overrides,
+        level,
+        experiment,
+        label,
+        reuse,
+        scenario_name=scenario_name,
     )
     if not done:
         execute(conn, scenario, run_id)
@@ -70,10 +83,12 @@ def prepare(
     experiment: str = "",
     label: str = "",
     reuse: bool = True,
+    scenario_name: str | None = None,
 ) -> tuple[int, bool]:
     """Creates the run's database row (or finds a finished identical run).
     Returns (run id, whether it is already done)."""
-    cfg = scenario.config(variant, overrides)
+    world = scenario_name or scenario.default_scenario
+    cfg = scenario.config(variant, overrides, scenario=world)
     code = code_version()
     if reuse:
         cached = storage.find_cached_run(conn, cfg.config_hash(), seed, ticks, level, code)
@@ -83,7 +98,7 @@ def prepare(
         conn,
         {
             "created": datetime.now(UTC).isoformat(timespec="seconds"),
-            "scenario": scenario.name,
+            "scenario": world,
             "variant": variant,
             "overrides": json.dumps(overrides or {}, sort_keys=True),
             "seed": seed,
@@ -141,6 +156,7 @@ def materialize(scenario: Scenario, run_id: int) -> int:
         level="full",
         experiment=info["experiment"],
         label=info["label"],
+        scenario_name=info["scenario"],
     )
 
 
@@ -166,10 +182,11 @@ def _git(*args: str) -> str:
 
 
 def _config_for(scenario: Scenario, info: dict[str, Any]) -> SimConfig:
-    cfg = scenario.config(info["variant"], info["overrides"])
+    cfg = scenario.config(info["variant"], info["overrides"], scenario=info["scenario"])
     if cfg.config_hash() != info["config_hash"]:
         raise ValueError(
-            f"run {info['id']} was made with different settings than scenario.toml now gives "
-            f"for variant {info['variant']!r}; it can't be reproduced exactly"
+            f"run {info['id']} was made with different settings than the scenario files now "
+            f"give for {info['scenario']!r}, variant {info['variant']!r}; it can't be "
+            "reproduced exactly"
         )
     return cfg

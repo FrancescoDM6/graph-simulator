@@ -3,7 +3,7 @@
 import pytest
 
 from graphsim import analysis, experiment, report, runner, storage
-from graphsim.config import load_scenario
+from graphsim.config import ExperimentSpec, load_scenario
 
 
 @pytest.fixture
@@ -104,3 +104,63 @@ def test_measures_on_a_synthetic_run():
     assert measures["community_flicker_share"] == pytest.approx(0.5)
     assert measures["community_median_lifespan"] == 25
     assert measures["splits_per_1000"] == pytest.approx(100)
+
+
+def two_worlds(scenario, sweep=None) -> str:
+    """Adds an experiment comparing two worlds (and returns its name)."""
+    scenario.experiments["worlds"] = ExperimentSpec(
+        description="test",
+        seeds=[1, 2],
+        ticks=40,
+        level="summary",
+        scenarios=["three_towns", "hub_and_spokes"],
+        variants=["baseline", "no_gifting"],
+        sweep=sweep or {},
+    )
+    return "worlds"
+
+
+def test_plan_crosses_worlds_with_variants_and_prefixes_labels(scenario):
+    jobs = experiment.plan(scenario, two_worlds(scenario))
+    assert len(jobs) == 2 * 2 * 2
+    assert {(job.label, job.scenario) for job in jobs} == {
+        ("three_towns/baseline", "three_towns"),
+        ("three_towns/no_gifting", "three_towns"),
+        ("hub_and_spokes/baseline", "hub_and_spokes"),
+        ("hub_and_spokes/no_gifting", "hub_and_spokes"),
+    }
+    # One world: labels stay as they always were.
+    assert {job.label for job in experiment.plan(scenario, "ablations", seeds=[1])} >= {"baseline"}
+
+
+def test_variants_are_paired_with_their_own_worlds_baseline(scenario):
+    name = two_worlds(scenario)
+    experiment.run_experiment(scenario, name, workers=2)
+    conn = storage.connect(scenario.database)
+    result = report.build(conn, scenario, name)
+    pairs = {(p["label"], p["baseline"]) for p in result["paired"]}
+    assert pairs == {
+        ("three_towns/no_gifting", "three_towns/baseline"),
+        ("hub_and_spokes/no_gifting", "hub_and_spokes/baseline"),
+    }  # no baseline is ever paired with another world's
+    runs = {r["label"]: r["run_id"] for r in result["runs"]}
+    assert storage.get_run(conn, runs["hub_and_spokes/baseline"])["scenario"] == "hub_and_spokes"
+    assert "hub_and_spokes/no_gifting" in report.format_text(result, scenario)
+
+
+def test_generator_parameters_can_be_swept(scenario):
+    scenario.experiments["bridges"] = ExperimentSpec(
+        description="test",
+        seeds=[1],
+        ticks=10,
+        level="summary",
+        scenarios=["two_regions"],
+        variants=["baseline"],
+        sweep={"generator.bridges": [1, 3]},
+    )
+    experiment.run_experiment(scenario, "bridges", workers=1)
+    conn = storage.connect(scenario.database)
+    labels = {a["label"]: a["run_id"] for a in storage.experiment_runs(conn, "bridges")}
+    assert set(labels) == {"baseline[generator.bridges=1]", "baseline[generator.bridges=3]"}
+    one, three = (storage.get_run(conn, labels[f"baseline[generator.bridges={b}]"]) for b in (1, 3))
+    assert one["config_hash"] != three["config_hash"]  # different maps

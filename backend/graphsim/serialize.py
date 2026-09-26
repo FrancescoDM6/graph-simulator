@@ -77,6 +77,7 @@ def _nodes(world: World) -> list[dict[str, Any]]:
                 "kind": "town",
                 "name": town.name,
                 "residents": len(world.agents_in_town(town.id)),
+                "position": list(world.cfg.world.towns[town.name].position),
             }
         )
     for site in world.sites.values():

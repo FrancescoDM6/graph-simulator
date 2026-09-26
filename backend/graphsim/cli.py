@@ -1,6 +1,7 @@
 """One run from the command line:
 
     python -m graphsim.cli --seed 4 --ticks 2000 [--variant no_gifting] [--set trade.min_amount=0.2]
+    python -m graphsim.cli --scenario two_regions --set generator.bridges=3
 
 The run is stored in the run database (scenario.toml [run] database) like any other, so it can
 be opened in the viewer or analysed later; an identical earlier run is reused, not recomputed.
@@ -17,6 +18,9 @@ from graphsim.config import load_scenario, parse_override
 def main() -> None:
     scenario = load_scenario()
     parser = argparse.ArgumentParser(description="Compute one run and summarize it.")
+    parser.add_argument(
+        "--scenario", default=scenario.default_scenario, choices=list(scenario.scenarios)
+    )
     parser.add_argument("--seed", type=int, default=scenario.seed)
     parser.add_argument("--ticks", type=int, default=scenario.ticks)
     parser.add_argument("--variant", default="baseline", choices=list(scenario.variants))
@@ -36,12 +40,16 @@ def main() -> None:
         level=args.level,
         label=args.label,
         reuse=not args.rerun,
+        scenario_name=args.scenario,
     )
     elapsed = time.perf_counter() - started
 
     conn = storage.connect(scenario.database)
     measures = storage.measures(conn, run_id)
-    print(f"run {run_id}: seed {args.seed}, {args.variant}, {args.ticks} ticks ({elapsed:.1f}s)")
+    print(
+        f"run {run_id}: {args.scenario}, seed {args.seed}, {args.variant}, {args.ticks} ticks "
+        f"({elapsed:.1f}s)"
+    )
     print(f"stored in {scenario.database}\n")
     print("Phenomena")
     for name, phenomenon in scenario.phenomena.items():

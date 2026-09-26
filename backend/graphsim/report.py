@@ -4,10 +4,12 @@ Three views of the same stored runs:
   runs     one row per run: its measures, and whether each phenomenon is present;
   summary  per variant and measure: n, mean, median, 5th and 95th percentile, and for each
            phenomenon the share of worlds showing it with a 95% Wilson interval;
-  paired   per variant and measure: the difference from the baseline run with the same seed.
-           Pairing by seed compares identical starting worlds, which removes most of the
-           seed-to-seed noise. We report the median difference and how consistently the
-           difference points one way ("same sign" = share of seeds agreeing with the median).
+  paired   per variant and measure: the difference from the baseline run with the same seed
+           in the same world. Pairing by seed compares identical starting worlds, which
+           removes most of the seed-to-seed noise. We report the median difference and how
+           consistently the difference points one way ("same sign" = share of seeds agreeing
+           with the median). Different worlds are never paired (the same seed on a different
+           map is a different world): compare them by their distributions in `summary`.
 """
 
 import csv
@@ -38,7 +40,12 @@ def build(conn, scenario: Scenario, experiment: str) -> dict[str, Any]:
 
     labels = list(dict.fromkeys(r["label"] for r in runs))
     measure_names = sorted({m for r in runs for m in r["measures"]})
-    baseline_label = _baseline_label(labels)
+    world_of = {r["label"]: r["scenario"] for r in runs}
+    worlds = list(dict.fromkeys(world_of.values()))
+    baseline_of_world = {
+        w: _baseline_label([lb for lb in labels if world_of[lb] == w]) for w in worlds
+    }
+    baselines = {label: baseline_of_world[world_of[label]] for label in labels}
 
     summary = []
     for label in labels:
@@ -57,25 +64,28 @@ def build(conn, scenario: Scenario, experiment: str) -> dict[str, Any]:
             })  # fmt: skip
 
     paired = []
-    if baseline_label:
+    for label in labels:
+        baseline_label = baselines[label]
+        if label == baseline_label:
+            continue
         base = {r["seed"]: r for r in runs if r["label"] == baseline_label}
-        for label in labels:
-            if label == baseline_label:
-                continue
-            for measure in measure_names:
-                diffs = [
-                    r["measures"][measure] - base[r["seed"]]["measures"][measure]
-                    for r in runs
-                    if r["label"] == label
-                    and r["seed"] in base
-                    and measure in r["measures"]
-                    and measure in base[r["seed"]]["measures"]
-                ]
-                paired.append({"label": label, "measure": measure, **_paired(diffs)})
+        for measure in measure_names:
+            diffs = [
+                r["measures"][measure] - base[r["seed"]]["measures"][measure]
+                for r in runs
+                if r["label"] == label
+                and r["seed"] in base
+                and measure in r["measures"]
+                and measure in base[r["seed"]]["measures"]
+            ]
+            paired.append(
+                {"label": label, "baseline": baseline_label, "measure": measure, **_paired(diffs)}
+            )
 
     return {
         "experiment": experiment,
-        "baseline": baseline_label,
+        "baseline": baselines[labels[0]] if len(worlds) == 1 and labels else None,
+        "baselines": baselines,  # label -> the label it is paired with (same world)
         "labels": labels,
         "runs": runs,
         "summary": summary,
@@ -128,14 +138,15 @@ def percentile(values: list[float], q: float) -> float:
 
 def format_text(result: dict[str, Any], scenario: Scenario) -> str:
     lines = [f"\nExperiment {result['experiment']}: {len(result['runs'])} runs"]
+    width = max([28, *(len(label) + 1 for label in result["labels"])])
     by_key = {(s["label"], s["measure"]): s for s in result["summary"]}
     paired_by_key = {(p["label"], p["measure"]): p for p in result["paired"]}
     for phenomenon, spec in scenario.phenomena.items():
         lines.append(f"\n{phenomenon}: {spec.description}")
         lines.append(f"  present if {spec.measure} {spec.present_if}")
         lines.append(
-            f"  {'variant':<28} {'present':>13} {'95% CI':>13}  {'median':>8} {'[p5, p95]':>18}"
-            f"  {'paired diff vs baseline':>26}"
+            f"  {'variant':<{width}} {'present':>13} {'95% CI':>13}  {'median':>8}"
+            f" {'[p5, p95]':>18}  {'paired diff vs its baseline':>28}"
         )
         for label in result["labels"]:
             presence = by_key.get((label, f"present:{phenomenon}"))
@@ -152,8 +163,8 @@ def format_text(result: dict[str, Any], scenario: Scenario) -> str:
                 else "n/a"
             )
             lines.append(
-                f"  {label:<28} {hits:>5}/{presence['n']:<3} ({presence['mean']:4.0%}) {ci:>13}"
-                f"  {stats['median']:8.3f} {spread:>18}  {pair_text:>26}"
+                f"  {label:<{width}} {hits:>5}/{presence['n']:<3} ({presence['mean']:4.0%})"
+                f" {ci:>13}  {stats['median']:8.3f} {spread:>18}  {pair_text:>28}"
             )
     return "\n".join(lines)
 
@@ -217,7 +228,9 @@ def _paired(diffs: list[float]) -> dict[str, Any]:
 
 
 def _baseline_label(labels: list[str]) -> str | None:
-    """The unswept baseline if present; otherwise the first label (e.g. in a pure sweep)."""
-    if BASELINE in labels:
-        return BASELINE
+    """Among one world's labels: its unswept baseline ("baseline" or "<world>/baseline") if
+    present, otherwise the first label (e.g. in a pure sweep)."""
+    for label in labels:
+        if label.split("/")[-1] == BASELINE:
+            return label
     return labels[0] if labels else None
