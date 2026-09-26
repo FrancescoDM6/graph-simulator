@@ -16,9 +16,14 @@ dev = [
     "ruff>=0.6",
 ]
 
-[tool.uv]
-# This is an application, not a library: run it from this folder, don't install it.
-package = false
+[build-system]
+requires = ["uv_build>=0.9,<0.10"]
+build-backend = "uv_build"
+
+# graphsim is installed into the venv (editable: edits take effect at once), so its commands
+# work from any folder: `uv run --project backend python -m graphsim.query ...`.
+[tool.uv.build-backend]
+module-root = ""  # the package is backend/graphsim (not src/graphsim)
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

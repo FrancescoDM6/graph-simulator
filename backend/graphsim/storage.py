@@ -360,6 +360,20 @@ def metric_series(
     return series
 
 
+def final_metrics(conn: sqlite3.Connection, run_id: int, names: list[str]) -> dict[str, float]:
+    """The named metrics at the run's last stored tick."""
+    owned, params = _owned(conn, run_id)
+    last = conn.execute(f"select max(tick) as t from tick_metrics where {owned}", params).fetchone()
+    if last is None or last["t"] is None:
+        return {}
+    rows = conn.execute(
+        f"select name, value from tick_metrics where {owned} and tick = ? "
+        f"and name in ({', '.join('?' for _ in names)})",
+        (*params, last["t"], *names),
+    )
+    return {row["name"]: row["value"] for row in rows}
+
+
 def snapshots(conn: sqlite3.Connection, run_id: int, first: int, count: int) -> list[dict]:
     owned, params = _owned(conn, run_id)
     rows = conn.execute(

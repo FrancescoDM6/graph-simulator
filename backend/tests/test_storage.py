@@ -128,3 +128,16 @@ def test_runs_from_before_scenarios_are_named_three_towns(scenario):
     conn.execute("update runs set scenario = 'scenario' where id = ?", (run_id,))
     storage._name_old_worlds(conn)
     assert storage.get_run(conn, run_id)["scenario"] == "three_towns"
+
+
+def test_the_query_command_reads_a_run(scenario, capsys, monkeypatch):
+    from graphsim import query
+
+    run_id = runner.run(scenario, seed=1, ticks=30)
+    monkeypatch.setattr(query, "load_scenario", lambda: scenario)
+    query.main(["show", str(run_id)])
+    query.main(["metrics", str(run_id), "population", "--every", "10"])
+    query.main(["sql", f"select count(*) as n from events where run_id = {run_id}"])
+    out = capsys.readouterr().out
+    assert f"Run {run_id}" in out and "population" in out
+    assert out.splitlines()[-3].strip() == "n"  # the SQL result's header

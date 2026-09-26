@@ -145,3 +145,38 @@ def test_a_run_in_a_generated_world_with_changed_parameters(client):
     assert len(towns) == 4 and all(len(t["position"]) == 2 for t in towns)
     bad = client.post("/api/runs", json={"seed": 1, "ticks": 5, "scenario": "atlantis"})
     assert bad.status_code == 400
+
+
+def test_branch_a_run_and_read_its_family(client):
+    started = client.post("/api/runs", json={"seed": 2, "ticks": 60}).json()
+    parent = wait_until_done(client, started["id"])
+    response = client.post(
+        f"/api/runs/{parent['id']}/branches",
+        json={"tick": 30, "interventions": [{"kind": "remove_agent", "target": "richest"}]},
+    )
+    branch = wait_until_done(client, response.json()["id"])
+    assert branch["status"] == "done" and branch["parent_run"] == parent["id"]
+    assert branch["interventions"][0]["tick"] == 30
+    events = client.get(f"/api/runs/{branch['id']}/events", params={"kinds": "intervention"}).json()
+    assert len(events) == 1 and events[0]["tick"] == 30
+    early = client.get(
+        f"/api/runs/{branch['id']}/snapshots", params={"first": 10, "count": 1}
+    ).json()
+    assert (
+        early
+        == client.get(
+            f"/api/runs/{parent['id']}/snapshots", params={"first": 10, "count": 1}
+        ).json()
+    )
+
+    family = client.get(f"/api/runs/{parent['id']}/lineage").json()
+    assert [c["id"] for c in family["children"]] == [branch["id"]]
+    assert "population" in family["children"][0]["final"]
+    assert [
+        a["id"] for a in client.get(f"/api/runs/{branch['id']}/lineage").json()["ancestors"]
+    ] == [parent["id"]]
+
+    bad = client.post(
+        f"/api/runs/{parent['id']}/branches", json={"tick": 30, "interventions": [{"kind": "nope"}]}
+    )
+    assert bad.status_code == 400 and "unknown intervention kind" in bad.json()["detail"]

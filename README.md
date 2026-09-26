@@ -140,15 +140,39 @@ uv run python -m graphsim.cli --scenario two_regions --set generator.bridges=3
 
 ## Working with the data
 
-All runs live in `runs/graphsim.db` (SQLite). The schema is at the top of
-[`backend/graphsim/storage.py`](backend/graphsim/storage.py). For example:
+All runs live in `runs/graphsim.db` (SQLite). The tables are described at the top of
+[`backend/graphsim/storage.py`](backend/graphsim/storage.py).
+
+No virtual environment needs activating: `uv run` uses (and if needed creates) `backend/.venv`.
+From the repository root, point it at the backend with `--project backend`; from `backend/`,
+leave that out.
+
+```bash
+uv run --project backend python -m graphsim.query runs                  # the newest runs
+uv run --project backend python -m graphsim.query show 1740             # settings, phenomena, measures
+uv run --project backend python -m graphsim.query metrics 1740 gini_coin starving --every 100
+uv run --project backend python -m graphsim.query events 1740 --kind new_top_broker
+uv run --project backend python -m graphsim.query agent 1740 agent-004  # life, coin sources, history
+uv run --project backend python -m graphsim.query sql "select name, value from run_measures where run_id = 1740"
+uv run --project backend python -m graphsim.query --csv gini.csv metrics 1740 gini_coin
+```
+
+A branch reads like a complete run: its parent's history fills in the ticks before it.
+
+For pandas (not a dependency), `--with` adds it for one session:
+
+```bash
+uv run --project backend --with pandas python
+```
 
 ```python
 import sqlite3, pandas as pd
 db = sqlite3.connect("runs/graphsim.db")
-pd.read_sql("select * from tick_metrics where run_id = 1", db)
-pd.read_sql("select * from agent_ticks where run_id = 1 and agent_id = 'agent-004'", db)
+m = pd.read_sql("select tick, name, value from tick_metrics where run_id = 1740", db)
+m.pivot(index="tick", columns="name", values="value")[["gini_coin", "starving"]].describe()
 ```
+
+Any SQLite browser (e.g. DB Browser for SQLite) can open the file too.
 
 ## Layout
 

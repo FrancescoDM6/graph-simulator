@@ -16,7 +16,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from graphsim import analysis, report, runner, storage
+from graphsim import analysis, interventions, report, runner, storage
 from graphsim.communities import entity_id
 from graphsim.config import PARTNER_CHOICE, SOCIAL_DYNAMICS, ScenarioError, load_scenario
 from graphsim.scenarios import world_summary
@@ -157,6 +157,58 @@ def start_run(conn: Db, request: NewRun) -> dict[str, Any]:
 @app.get("/api/runs/{run_id}")
 def get_run(conn: Db, run_id: int) -> dict[str, Any]:
     return _require_run(conn, run_id)
+
+
+class NewBranch(BaseModel):
+    tick: int
+    interventions: list[dict[str, Any]] = []  # applied at `tick`; e.g. {"kind": "reseed"}
+    label: str = ""
+
+
+@app.post("/api/runs/{run_id}/branches")
+def start_branch(conn: Db, run_id: int, request: NewBranch) -> dict[str, Any]:
+    """Starts computing an alternate history of the run from `tick` (or returns an identical
+    stored one). Before `tick` it is the run itself; see runner.branch."""
+    _require_run(conn, run_id)
+    try:
+        branch_id, done = runner.prepare_branch(
+            conn, load_scenario(), run_id, request.tick, request.interventions, request.label
+        )
+    except (ValueError, ScenarioError) as error:  # includes interventions.InterventionError
+        raise HTTPException(400, str(error)) from error
+    if not done:
+        _compute_in_background(branch_id)
+    return storage.get_run(conn, branch_id) or {}
+
+
+@app.get("/api/runs/{run_id}/lineage")
+def lineage(conn: Db, run_id: int) -> dict[str, Any]:
+    """The run's family: the runs it branched from (oldest first), its siblings (other branches
+    of its parent) and its own branches, each with its numbers at its last stored tick."""
+    run = _require_run(conn, run_id)
+    ancestors = [storage.get_run(conn, r) for r, _, _ in storage.lineage(conn, run_id)[:-1]]
+
+    def children(parent: int) -> list[dict[str, Any]]:
+        rows = conn.execute("select id from runs where parent_run = ? order by id", (parent,))
+        return [storage.get_run(conn, row["id"]) for row in rows]
+
+    def with_final(info: dict[str, Any]) -> dict[str, Any]:
+        return {**info, "final": storage.final_metrics(conn, info["id"], FINAL_METRICS)}
+
+    siblings = (
+        [r for r in children(run["parent_run"]) if r["id"] != run_id] if run["parent_run"] else []
+    )
+    return {
+        "run": with_final(run),
+        "ancestors": [with_final(r) for r in ancestors if r],
+        "siblings": [with_final(r) for r in siblings],
+        "children": [with_final(r) for r in children(run_id)],
+        "intervention_kinds": {kind: list(params) for kind, params in interventions.KINDS.items()},
+    }
+
+
+# Numbers shown to compare a run with its branches (their values at the last stored tick).
+FINAL_METRICS = ["population", "gini_coin", "broker_share", "avg_trust", "starving"]
 
 
 @app.post("/api/runs/{run_id}/materialize")
