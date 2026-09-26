@@ -31,7 +31,10 @@ create table if not exists runs (
     experiment text not null,       -- experiment name, or "" for a one-off run
     label text not null,
     status text not null,           -- "running", "done" or "failed"
-    ticks_done integer not null
+    ticks_done integer not null,
+    parent_run integer,             -- a branch: the run it branched from (see runner.branch)
+    branch_tick integer,            -- ... and the tick it starts at (earlier ticks: the parent's)
+    interventions text not null default '[]'  -- JSON: every intervention in its history
 );
 create table if not exists tick_metrics (
     run_id integer, tick integer, name text, value real,
@@ -157,6 +160,9 @@ def connect(path: Path | str) -> sqlite3.Connection:
 # Columns added after a table was first created: (table, column, type). Databases made by older
 # versions get them added (as empty) when opened, so old runs stay readable.
 ADDED_COLUMNS = [
+    ("runs", "parent_run", "integer"),
+    ("runs", "branch_tick", "integer"),
+    ("runs", "interventions", "text not null default '[]'"),
     ("community_ticks", "density", "real"),
     ("community_ticks", "trust", "real"),
     ("community_ticks", "trade", "real"),
@@ -264,23 +270,60 @@ def delete_run(conn: sqlite3.Connection, run_id: int) -> None:
 
 
 def find_cached_run(
-    conn: sqlite3.Connection, config_hash: str, seed: int, ticks: int, level: str, code: str
+    conn: sqlite3.Connection,
+    config_hash: str,
+    seed: int,
+    ticks: int,
+    level: str,
+    code: str,
+    interventions: str = "[]",
+    branch_tick: int | None = None,
 ) -> int | None:
-    """A finished run with exactly these settings, at this level of detail or more."""
+    """A finished run with exactly these settings (and interventions, from the same branch
+    tick), at this level of detail or more."""
     acceptable = LEVELS[LEVELS.index(level) :]
     placeholders = ", ".join("?" for _ in acceptable)
     row = conn.execute(
         f"""select id from runs where config_hash = ? and seed = ? and ticks = ?
             and code_version = ? and status = 'done' and level in ({placeholders})
+            and interventions = ? and branch_tick is ?
             order by id desc limit 1""",
-        (config_hash, seed, ticks, code, *acceptable),
+        (config_hash, seed, ticks, code, *acceptable, interventions, branch_tick),
     ).fetchone()
     return row["id"] if row else None
 
 
+def lineage(conn: sqlite3.Connection, run_id: int) -> list[tuple[int, int, int]]:
+    """Which run holds which ticks: [(run id, first tick, last tick), ...], oldest first. An
+    ordinary run holds all its ticks; a branch holds its ticks from its branch tick, and its
+    parent (and so on up) the ones before."""
+    segments = []
+    last = 1 << 62
+    while True:
+        row = conn.execute(
+            "select parent_run, branch_tick from runs where id = ?", (run_id,)
+        ).fetchone()
+        if row is None or row["parent_run"] is None:
+            segments.append((run_id, 0, last))
+            return segments[::-1]
+        segments.append((run_id, row["branch_tick"], last))
+        last = row["branch_tick"] - 1
+        run_id = row["parent_run"]
+
+
+def _owned(conn: sqlite3.Connection, run_id: int, alias: str = "") -> tuple[str, list[Any]]:
+    """A SQL condition selecting the rows of a run's history (its own, and for a branch its
+    ancestors' before the branch tick), with its parameters. For tables with a `tick` column."""
+    p = f"{alias}." if alias else ""
+    segments = lineage(conn, run_id)
+    sql = " or ".join(f"({p}run_id = ? and {p}tick between ? and ?)" for _ in segments)
+    return f"({sql})", [value for segment in segments for value in segment]
+
+
 def list_runs(conn: sqlite3.Connection, experiment: str | None = None) -> list[dict[str, Any]]:
     query = """select id, created, scenario, variant, overrides, seed, ticks, level, config_hash,
-                      code_version, experiment, label, status, ticks_done from runs"""
+                      code_version, experiment, label, status, ticks_done, parent_run,
+                      branch_tick, interventions from runs"""
     params: tuple = ()
     if experiment is not None:
         query += " where experiment = ?"
@@ -295,8 +338,9 @@ def get_run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any] | None:
 
 
 def metric_names(conn: sqlite3.Connection, run_id: int) -> list[str]:
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        "select distinct name from tick_metrics where run_id = ? order by name", (run_id,)
+        f"select distinct name from tick_metrics where {owned} order by name", params
     ).fetchall()
     return [row["name"] for row in rows]
 
@@ -305,8 +349,8 @@ def metric_series(
     conn: sqlite3.Connection, run_id: int, names: list[str] | None = None
 ) -> dict[str, list[tuple[int, float]]]:
     """name -> [(tick, value), ...] in tick order."""
-    query = "select name, tick, value from tick_metrics where run_id = ?"
-    params: list[Any] = [run_id]
+    owned, params = _owned(conn, run_id)
+    query = f"select name, tick, value from tick_metrics where {owned}"
     if names:
         query += f" and name in ({', '.join('?' for _ in names)})"
         params += names
@@ -317,9 +361,10 @@ def metric_series(
 
 
 def snapshots(conn: sqlite3.Connection, run_id: int, first: int, count: int) -> list[dict]:
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        "select data from snapshots where run_id = ? and tick >= ? order by tick limit ?",
-        (run_id, first, count),
+        f"select data from snapshots where {owned} and tick >= ? order by tick limit ?",
+        (*params, first, count),
     ).fetchall()
     return [json.loads(gzip.decompress(row["data"])) for row in rows]
 
@@ -335,8 +380,9 @@ def events(
     limit: int = 1000,
 ) -> list[dict[str, Any]]:
     query = "select e.* from events e"
-    conditions = ["e.run_id = ?", "e.tick >= ?"]
-    params: list[Any] = [run_id, first_tick]
+    owned, params = _owned(conn, run_id, "e")
+    conditions = [owned, "e.tick >= ?"]
+    params.append(first_tick)
     if entity:
         query += " join event_subjects s on s.run_id = e.run_id and s.event_id = e.id"
         conditions.append("s.entity = ?")
@@ -351,14 +397,14 @@ def events(
         params += kinds
     query += " where " + " and ".join(conditions) + " order by e.id limit ?"
     rows = conn.execute(query, [*params, limit]).fetchall()
-    return [_event_dict(conn, run_id, row) for row in rows]
+    return [_event_dict(conn, row) for row in rows]
 
 
 def event(conn: sqlite3.Connection, run_id: int, event_id: int) -> dict[str, Any] | None:
-    row = conn.execute(
-        "select * from events where run_id = ? and id = ?", (run_id, event_id)
-    ).fetchone()
-    return _event_dict(conn, run_id, row) if row else None
+    owned, params = _owned(conn, run_id)
+    row = conn.execute(f"select * from events where {owned} and id = ?", (*params, event_id))
+    row = row.fetchone()
+    return _event_dict(conn, row) if row else None
 
 
 def causal_trail(
@@ -387,15 +433,16 @@ def causal_trail(
 
 def agents(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:
     rows = conn.execute("select * from agents where run_id = ? order by agent_id", (run_id,))
-    return [dict(row) for row in rows]
+    return [_without_run(row) for row in rows]
 
 
 def agent_history(conn: sqlite3.Connection, run_id: int, agent_id: str) -> list[dict[str, Any]]:
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        "select * from agent_ticks where run_id = ? and agent_id = ? order by tick",
-        (run_id, agent_id),
+        f"select * from agent_ticks where {owned} and agent_id = ? order by tick",
+        (*params, agent_id),
     ).fetchall()
-    return [{**dict(row), "inventory": json.loads(row["inventory"])} for row in rows]
+    return [_without_run(row) | {"inventory": json.loads(row["inventory"])} for row in rows]
 
 
 def trust_changes(
@@ -408,12 +455,13 @@ def trust_changes(
 ) -> list[dict[str, Any]]:
     """Every trust change on the agent's ties (optionally only with `other`), oldest first."""
     last = last_tick if last_tick is not None else 1 << 62
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        """select * from trust_changes where run_id = ? and (a = ? or b = ?)
-           and tick between ? and ? order by tick, rowid""",
-        (run_id, agent, agent, first_tick, last),
+        f"""select * from trust_changes where {owned} and (a = ? or b = ?)
+            and tick between ? and ? order by tick, rowid""",
+        (*params, agent, agent, first_tick, last),
     ).fetchall()
-    changes = [dict(row) for row in rows]
+    changes = [_without_run(row) for row in rows]
     if other:
         changes = [c for c in changes if other in (c["a"], c["b"])]
     return changes
@@ -428,10 +476,11 @@ def flows(
 ) -> list[dict[str, Any]]:
     """The agent's ledger entries (full-level runs), oldest first."""
     last = last_tick if last_tick is not None else 1 << 62
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        """select tick, asset, category, amount, counterparty, event_id from flows
-           where run_id = ? and agent_id = ? and tick between ? and ? order by tick, rowid""",
-        (run_id, agent, first_tick, last),
+        f"""select tick, asset, category, amount, counterparty, event_id from flows
+            where {owned} and agent_id = ? and tick between ? and ? order by tick, rowid""",
+        (*params, agent, first_tick, last),
     )
     return [dict(row) for row in rows]
 
@@ -449,15 +498,16 @@ def communities(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]:
     rows = conn.execute(
         "select * from communities where run_id = ? order by community_id", (run_id,)
     )
-    return [dict(row) for row in rows]
+    return [_without_run(row) for row in rows]
 
 
 def community_sizes(conn: sqlite3.Connection, run_id: int) -> dict[int, list[tuple[int, int]]]:
     """community id -> [(tick, size), ...] (full-level runs only)."""
     sizes: dict[int, list[tuple[int, int]]] = {}
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        "select community_id, tick, size from community_ticks where run_id = ? order by tick",
-        (run_id,),
+        f"select community_id, tick, size from community_ticks where {owned} order by tick",
+        params,
     )
     for row in rows:
         sizes.setdefault(row["community_id"], []).append((row["tick"], row["size"]))
@@ -466,15 +516,16 @@ def community_sizes(conn: sqlite3.Connection, run_id: int) -> dict[int, list[tup
 
 def community_members(conn: sqlite3.Connection, run_id: int, tick: int) -> dict[int, list[str]]:
     """community id -> members at the latest detection at or before `tick`."""
+    owned, params = _owned(conn, run_id)
     row = conn.execute(
-        "select max(tick) as t from community_ticks where run_id = ? and tick <= ?",
-        (run_id, tick),
+        f"select max(tick) as t from community_ticks where {owned} and tick <= ?",
+        (*params, tick),
     ).fetchone()
     if row is None or row["t"] is None:
         return {}
     rows = conn.execute(
-        "select community_id, members from community_ticks where run_id = ? and tick = ?",
-        (run_id, row["t"]),
+        f"select community_id, members from community_ticks where {owned} and tick = ?",
+        (*params, row["t"]),
     )
     return {r["community_id"]: json.loads(r["members"]) for r in rows}
 
@@ -508,19 +559,21 @@ def all_measures(conn: sqlite3.Connection, run_ids: list[int]) -> dict[int, dict
 
 def community_history(conn: sqlite3.Connection, run_id: int, community_id: int) -> list[dict]:
     """The community at every detection: size, members and internal stats (full-level runs)."""
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        """select tick, size, members, density, trust, trade from community_ticks
-           where run_id = ? and community_id = ? order by tick""",
-        (run_id, community_id),
+        f"""select tick, size, members, density, trust, trade from community_ticks
+            where {owned} and community_id = ? order by tick""",
+        (*params, community_id),
     )
     return [{**dict(row), "members": json.loads(row["members"])} for row in rows]
 
 
 def org_history(conn: sqlite3.Connection, run_id: int, org_id: str) -> list[dict]:
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        """select tick, name, size, members, density, trust from org_ticks
-           where run_id = ? and org_id = ? order by tick""",
-        (run_id, org_id),
+        f"""select tick, name, size, members, density, trust from org_ticks
+            where {owned} and org_id = ? order by tick""",
+        (*params, org_id),
     )
     return [{**dict(row), "members": json.loads(row["members"])} for row in rows]
 
@@ -530,24 +583,32 @@ def measures(conn: sqlite3.Connection, run_id: int) -> dict[str, float]:
     return {row["name"]: row["value"] for row in rows}
 
 
-def event_counts(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
+def event_counts(conn: sqlite3.Connection, run_id: int, since_tick: int = 0) -> dict[str, int]:
+    owned, params = _owned(conn, run_id)
     rows = conn.execute(
-        "select kind, count(*) as n from events where run_id = ? group by kind", (run_id,)
+        f"select kind, count(*) as n from events where {owned} and tick >= ? group by kind",
+        (*params, since_tick),
     )
     return {row["kind"]: row["n"] for row in rows}
+
+
+def _without_run(row: sqlite3.Row) -> dict[str, Any]:
+    """A row as a dict, without its run id (a branch's history mixes rows of several runs)."""
+    return {k: row[k] for k in row.keys() if k != "run_id"}
 
 
 def _run_dict(row: sqlite3.Row) -> dict[str, Any]:
     run = dict(row)
     run["overrides"] = json.loads(run["overrides"])
+    run["interventions"] = json.loads(run.get("interventions") or "[]")
     run.pop("config_json", None)
     return run
 
 
-def _event_dict(conn: sqlite3.Connection, run_id: int, row: sqlite3.Row) -> dict[str, Any]:
+def _event_dict(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     causes = conn.execute(
         "select cause_id from event_causes where run_id = ? and event_id = ? order by cause_id",
-        (run_id, row["id"]),
+        (row["run_id"], row["id"]),
     ).fetchall()
     return {
         "id": row["id"],

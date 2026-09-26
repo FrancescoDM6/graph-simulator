@@ -26,6 +26,10 @@ class RunData:
     event_counts: dict[str, int]
     ticks: int
     min_lifespan: int  # communities shorter-lived than this count as detection flicker
+    # A branch (runner.branch) is measured from its branch point on: what happened after the
+    # intervention. None for an ordinary run, which is measured over the whole run (and its
+    # averages over the second half, once the world has settled).
+    branch_tick: int | None = None
 
 
 def ledger_summary(flows: list[dict]) -> dict:
@@ -76,19 +80,34 @@ def community_row(record: CommunityRecord, now: int) -> dict:
 # --- helpers ----------------------------------------------------------------------------------
 
 
+def window(run: RunData, name: str) -> Series:
+    """The part of a series that measures look at: all of it, or a branch's part."""
+    series = run.series.get(name, [])
+    return (
+        series if run.branch_tick is None else [(t, v) for t, v in series if t >= run.branch_tick]
+    )
+
+
 def values(run: RunData, name: str) -> list[float]:
-    return [v for _, v in run.series.get(name, [])]
+    return [v for _, v in window(run, name)]
 
 
 def later_half(run: RunData, name: str) -> list[float]:
-    """The second half of the run, after the world has had time to settle."""
+    """Where averages are taken: the second half of the run, after the world has had time to
+    settle; for a branch, everything from its branch point."""
+    if run.branch_tick is not None:
+        return values(run, name)
     return [v for tick, v in run.series.get(name, []) if tick > run.ticks / 2]
 
 
+def window_length(run: RunData) -> int:
+    return run.ticks - (run.branch_tick - 1 if run.branch_tick is not None else 0)
+
+
 def in_and_out_of_drought(run: RunData, name: str) -> tuple[list[float], list[float]]:
-    drought = dict(run.series.get("drought", []))
+    drought = dict(window(run, "drought"))
     inside, outside = [], []
-    for tick, value in run.series.get(name, []):
+    for tick, value in window(run, name):
         (inside if drought.get(tick) else outside).append(value)
     return inside, outside
 
@@ -98,7 +117,10 @@ def ratio(a: float, b: float) -> float:
 
 
 def born_later(run: RunData) -> list[dict]:
-    """Communities that formed during the run (not the ones found at the first detection)."""
+    """Communities that formed during the run (not the ones found at the first detection); for
+    a branch, those formed after its branch point."""
+    if run.branch_tick is not None:
+        return [c for c in run.communities if c["born"] >= run.branch_tick]
     if not run.communities:
         return []
     first_detection = min(c["born"] for c in run.communities)
@@ -140,7 +162,7 @@ def drought_gift_ratio(run: RunData) -> float:
 
 def drought_trust_change(run: RunData) -> float:
     """Average trust at each drought's last tick minus just before it began."""
-    drought = run.series.get("drought", [])
+    drought = window(run, "drought")
     trust = dict(run.series.get("avg_trust", []))
     changes = []
     start_trust = None
@@ -172,7 +194,8 @@ def community_turnover(run: RunData) -> float:
 
 def per_1000_ticks(kind: str) -> Callable[[RunData], float]:
     def measure(run: RunData) -> float:
-        return 1000 * run.event_counts.get(kind, 0) / run.ticks if run.ticks else 0.0
+        length = window_length(run)
+        return 1000 * run.event_counts.get(kind, 0) / length if length > 0 else 0.0
 
     return measure
 

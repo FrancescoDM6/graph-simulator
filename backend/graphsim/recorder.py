@@ -15,11 +15,17 @@ from graphsim.storage import Batch
 
 
 class Recorder:
-    def __init__(self, world: World, spec: RecordingSpec) -> None:
+    """Records a world from tick 0. A branch (runner.branch) replays its parent's history, and
+    only its own ticks are written: `record_from` is its branch tick. Everything that describes
+    the whole run (agent lifetimes, ledger totals, community records, the measures) still
+    covers every tick, so a branch's per-run tables are complete."""
+
+    def __init__(self, world: World, spec: RecordingSpec, record_from: int = 0) -> None:
         self.world = world
         self.spec = spec
+        self.record_from = record_from
         self.batch = Batch()
-        self.founding = set(world.agents)
+        self.founding = {a.id for a in world.agents.values() if a.arrived == 0}
         self.lifetimes: dict[str, list] = {}  # agent id -> row for the agents table
         self.changed_lifetimes: dict[str, None] = {}  # rows to (re)write at the next flush
         # Every tick's metrics, kept in memory for the run's measures, so a run's measures don't
@@ -30,8 +36,13 @@ class Recorder:
         self.flow_totals: dict[tuple[str, str, str], float] = {}
         self._record_flows()  # the endowments recorded while the world was built
         self._note_arrivals()
-        if spec.snapshots:
+        if spec.snapshots and record_from == 0:
             self._snapshot()
+
+    @property
+    def writing(self) -> bool:
+        """Whether this tick's rows are stored (a branch stores only its own ticks)."""
+        return self.world.tick >= self.record_from
 
     def after_tick(self, events: list[Event]) -> None:
         world, spec = self.world, self.spec
@@ -41,22 +52,23 @@ class Recorder:
                 self.all_metrics.setdefault(name, []).append((tick, float(value)))
         self._note_arrivals()
         self._record_events(events)
-        if tick == 1 or tick % spec.metrics_every == 0:
-            self._record_metrics()
-        if spec.agent_history_every and tick % spec.agent_history_every == 0:
-            self._record_agents()
         self._record_flows()
-        if spec.trust_ledger:
-            self.batch.trust_changes += [
-                (tick, c.a, c.b, c.before, c.after, c.event_id) for c in world.trust_changes
-            ]
-        if spec.community_history and world.metrics.detections != self.detections_seen:
-            self._record_communities()
-        if spec.community_history:
-            self._record_orgs()
+        if self.writing:
+            if tick == 1 or tick % spec.metrics_every == 0 or tick == self.record_from:
+                self._record_metrics()
+            if spec.agent_history_every and tick % spec.agent_history_every == 0:
+                self._record_agents()
+            if spec.trust_ledger:
+                self.batch.trust_changes += [
+                    (tick, c.a, c.b, c.before, c.after, c.event_id) for c in world.trust_changes
+                ]
+            if spec.community_history and world.metrics.detections != self.detections_seen:
+                self._record_communities()
+            if spec.community_history:
+                self._record_orgs()
+            if spec.snapshots:
+                self._snapshot()
         self.detections_seen = world.metrics.detections
-        if spec.snapshots:
-            self._snapshot()
 
     def flush(self) -> Batch:
         """Everything recorded since the last flush."""
@@ -88,13 +100,16 @@ class Recorder:
             )
             for r in records
         ]  # fmt: skip
+        branch_tick = self.record_from or None
+        measured_events = [e for e in world.log.events if e.tick >= self.record_from]
         batch.measures = analysis.compute_measures(
             analysis.RunData(
                 series=self.all_metrics,
                 communities=records,
-                event_counts=_count_kinds(world.log.events),
+                event_counts=_count_kinds(measured_events),
                 ticks=world.tick,
                 min_lifespan=world.cfg.metrics.community_min_lifespan,
+                branch_tick=branch_tick,
             )
         )
         return batch
@@ -117,7 +132,7 @@ class Recorder:
                 row = self.lifetimes[event.subjects[0]]
                 row[5], row[6] = event.tick, event.id  # departed, departure_event
                 self.changed_lifetimes[event.subjects[0]] = None
-            if event.detail and not self.spec.detail_events:
+            if not self.writing or (event.detail and not self.spec.detail_events):
                 continue
             batch.events.append(
                 (
@@ -133,7 +148,7 @@ class Recorder:
         for flow in self.world.flows:
             key = (flow.agent, flow.asset, flow.category)
             self.flow_totals[key] = self.flow_totals.get(key, 0.0) + flow.amount
-            if self.spec.flows:
+            if self.spec.flows and self.writing:
                 self.batch.flows.append(
                     (tick, flow.agent, flow.asset, flow.category, round(flow.amount, 6),
                      flow.counterparty, flow.event_id)
