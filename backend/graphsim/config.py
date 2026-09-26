@@ -1,15 +1,18 @@
-"""The shape of scenario.toml, and the code that reads it.
+"""The shape of scenario.toml and scenarios/*.toml, and the code that reads them.
 
-The values live only in scenario.toml; the dataclasses here define which keys must exist and
-what type each one has. Loading is strict: a missing key, an unknown key, or a value of the
-wrong type stops with an error naming the exact place, so a typo can never silently change an
-experiment.
+scenario.toml holds the model (economy, rules, mechanisms, variants, experiments). Each file in
+scenarios/ is a world to run it in: a map written out town by town, or a generator with a few
+parameters that writes the map (generators.py). The dataclasses here define which keys must
+exist and what type each one has. Loading is strict: a missing key, an unknown key, or a value
+of the wrong type stops with an error naming the exact place, so a typo can never silently
+change an experiment.
 
-    scenario = load_scenario()                         # the file, parsed
-    cfg = scenario.config("no_gifting")                # SimConfig for one variant
-    cfg = scenario.config(overrides={"trade.broker_commission": 0.8})
+    scenario = load_scenario()                          # the files, parsed
+    cfg = scenario.config("no_gifting")                 # SimConfig: default map, one variant
+    cfg = scenario.config(scenario="two_regions", overrides={"generator.bridges": 3})
 
-Only SimConfig reaches the simulation (as `world.cfg`). Its hash identifies a run's settings.
+Only SimConfig reaches the simulation (as `world.cfg`). Its hash identifies a run's settings;
+a generated map is part of it, so two maps never share a hash.
 """
 
 import copy
@@ -22,8 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from graphsim import generators
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCENARIO = REPO_ROOT / "scenario.toml"
+SCENARIO_DIR = "scenarios"  # next to scenario.toml
 
 
 class ScenarioError(ValueError):
@@ -71,10 +77,12 @@ class OccupationSpec:
 class SiteSpec:
     name: str
     kind: str
+    scale: float  # multiplies the kind's capacity and regen: 1.0 = one standard site
 
 
 @dataclass(frozen=True)
 class TownSpec:
+    position: tuple[float, float]  # where the town sits on the map, 0..1 (the viewer's layout)
     sites: tuple[SiteSpec, ...]
     founding: dict[str, int]  # occupation -> count; order is the order agents are created in
 
@@ -257,11 +265,20 @@ SIM_SECTIONS = [f.name for f in dataclasses.fields(SimConfig)]
 
 
 @dataclass(frozen=True)
+class LayoutSpec:
+    """What a generated map spreads over its towns (scenario.toml [layout])."""
+
+    population: dict[str, int]  # occupation -> founding people
+    site_capacity: dict[str, float]  # site kind -> total capacity, in standard sites
+
+
+@dataclass(frozen=True)
 class ExperimentSpec:
     description: str
     seeds: list[int]
     ticks: int
     level: str
+    scenarios: list[str]
     variants: list[str]
     sweep: dict[str, list[Any]]
 
@@ -297,16 +314,60 @@ class RecordingSpec:
     snapshots: bool
 
 
-class Scenario:
-    """scenario.toml, parsed. Use `config()` to get the SimConfig for a variant."""
+@dataclass(frozen=True)
+class ScenarioFile:
+    """One file in scenarios/: a title, a description, and either an explicit `world` (towns
+    and roads) or a `generator` table; any other sections change the model like a variant."""
 
-    def __init__(self, raw: dict[str, Any], path: Path) -> None:
+    name: str
+    title: str
+    description: str
+    world: dict[str, Any] | None
+    generator: dict[str, Any] | None
+    changes: dict[str, Any]  # e.g. [layout] or [seasons] settings this world changes
+
+    @staticmethod
+    def parse(name: str, raw: dict[str, Any]) -> "ScenarioFile":
+        where = f"{SCENARIO_DIR}/{name}.toml"
+        for key in ("title", "description"):
+            if not isinstance(raw.get(key), str):
+                raise ScenarioError(f"{where}: needs a text `{key}`")
+        if ("world" in raw) == ("generator" in raw):
+            raise ScenarioError(f"{where}: needs either a [world] map or a [generator], not both")
+        rest = {
+            k: v for k, v in raw.items() if k not in ("title", "description", "world", "generator")
+        }
+        return ScenarioFile(
+            name, raw["title"], raw["description"], raw.get("world"), raw.get("generator"), rest
+        )
+
+
+class Scenario:
+    """scenario.toml plus the worlds in scenarios/, parsed. Use `config()` to get the SimConfig
+    for a world and a variant."""
+
+    def __init__(
+        self,
+        raw: dict[str, Any],
+        path: Path,
+        scenario_files: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self.raw = raw
         self.path = path
         self.name = path.stem
         self.seed: int = _require(raw, "run", "seed")
         self.ticks: int = _require(raw, "run", "ticks")
         self.database = (path.parent / _require(raw, "run", "database")).resolve()
+        self.default_scenario: str = _require(raw, "run", "scenario")
+        _build(LayoutSpec, _require(raw, "layout"), "layout")
+        files = scenario_files if scenario_files is not None else read_scenario_files(path)
+        self.scenario_files = files  # as parsed, e.g. for tests that edit a map
+        self.scenarios = {name: ScenarioFile.parse(name, files[name]) for name in sorted(files)}
+        if self.default_scenario not in self.scenarios:
+            raise ScenarioError(
+                f"run.scenario: no {SCENARIO_DIR}/{self.default_scenario}.toml "
+                f"(found {list(self.scenarios)})"
+            )
         self.variants: dict[str, dict[str, Any]] = raw.get("variants", {})
         self.experiments = {
             name: _build(ExperimentSpec, _with_seed_list(spec), f"experiments.{name}")
@@ -322,25 +383,68 @@ class Scenario:
         }
         self.viewer: dict[str, Any] = raw.get("viewer", {})
         # Validate everything now, not at first use.
+        for name in self.scenarios:
+            self.config(scenario=name)
         for name in self.variants:
             self.config(name)
         for name, experiment in self.experiments.items():
             for variant in experiment.variants:
                 if variant not in self.variants:
                     raise ScenarioError(f"experiments.{name}: unknown variant {variant!r}")
+            for world in experiment.scenarios:
+                if world not in self.scenarios:
+                    raise ScenarioError(f"experiments.{name}: unknown scenario {world!r}")
+                for variant in experiment.variants:
+                    self.config(
+                        variant, scenario=world
+                    )  # e.g. a variant naming another map's towns
             if experiment.level not in self.recording:
                 raise ScenarioError(f"experiments.{name}.level: no [recording.{experiment.level}]")
 
     def config(
-        self, variant: str | None = None, overrides: dict[str, Any] | None = None
+        self,
+        variant: str | None = None,
+        overrides: dict[str, Any] | None = None,
+        scenario: str | None = None,
     ) -> SimConfig:
+        """The settings for one run: this file, then the scenario's world (and anything else it
+        changes), then the variant, then the overrides. Overrides named `generator.<param>` set
+        the scenario's generator parameters, e.g. {"generator.bridges": 3}."""
+        name = scenario or self.default_scenario
+        if name not in self.scenarios:
+            raise ScenarioError(f"unknown scenario {name!r}; known: {list(self.scenarios)}")
+        world = self.scenarios[name]
         sim_raw = {section: copy.deepcopy(self.raw.get(section)) for section in SIM_SECTIONS}
+        layout_raw = copy.deepcopy(self.raw["layout"])
+        _deep_merge({**sim_raw, "layout": layout_raw}, world.changes, f"{SCENARIO_DIR}.{name}")
+
+        remaining = dict(overrides or {})
+        generator_overrides = {
+            k: remaining.pop(k) for k in list(remaining) if k.startswith("generator.")
+        }
+        if world.generator is not None:
+            params = copy.deepcopy(world.generator)
+            for dotted_key, value in generator_overrides.items():
+                _set_dotted({"generator": params}, dotted_key, value)
+            layout = _build(LayoutSpec, layout_raw, "layout")
+            try:
+                sim_raw["world"].update(generators.build(params, layout, sim_raw["occupations"]))
+            except generators.GeneratorError as e:
+                raise ScenarioError(f"{SCENARIO_DIR}/{name}.toml: {e}") from e
+        else:
+            if generator_overrides:
+                raise ScenarioError(
+                    f"scenario {name!r} is a written-out map with no generator to set "
+                    f"{list(generator_overrides)}"
+                )
+            sim_raw["world"].update(copy.deepcopy(world.world))
+
         if variant and variant != "baseline":
             if variant not in self.variants:
                 raise ScenarioError(f"unknown variant {variant!r}; known: {list(self.variants)}")
             changes = {k: v for k, v in self.variants[variant].items() if k != "description"}
             _deep_merge(sim_raw, changes, f"variants.{variant}")
-        for dotted_key, value in (overrides or {}).items():
+        for dotted_key, value in remaining.items():
             _set_dotted(sim_raw, dotted_key, value)
         cfg = _build(SimConfig, sim_raw, "")
         _check_references(cfg)
@@ -352,6 +456,15 @@ def load_scenario(path: Path | str = DEFAULT_SCENARIO) -> Scenario:
     with path.open("rb") as f:
         raw = tomllib.load(f)
     return Scenario(raw, path)
+
+
+def read_scenario_files(path: Path) -> dict[str, dict[str, Any]]:
+    """Every scenarios/<name>.toml next to scenario.toml, parsed, by name."""
+    files = {}
+    for file in sorted((path.parent / SCENARIO_DIR).glob("*.toml")):
+        with file.open("rb") as f:
+            files[file.stem] = tomllib.load(f)
+    return files
 
 
 def parse_override(text: str) -> tuple[str, Any]:
@@ -482,9 +595,13 @@ def _check_references(cfg: SimConfig) -> None:
         if occ.reach not in ("home", "home_and_neighbours"):
             raise ScenarioError(f"occupations.{name}.reach: use 'home' or 'home_and_neighbours'")
     for town_name, town in cfg.world.towns.items():
+        if len(town.position) != 2:
+            raise ScenarioError(f"world.towns.{town_name}.position: expected [x, y]")
         for site in town.sites:
             if site.kind not in cfg.site_kinds:
                 raise ScenarioError(f"world.towns.{town_name}: no site kind {site.kind!r}")
+            if site.scale <= 0:
+                raise ScenarioError(f"world.towns.{town_name}: site {site.name!r} needs scale > 0")
         for occupation in town.founding:
             if occupation not in cfg.occupations:
                 raise ScenarioError(f"world.towns.{town_name}.founding: no {occupation!r}")

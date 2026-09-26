@@ -14,11 +14,15 @@ from graphsim.config import (
 from graphsim.world_gen import build_world
 
 
-def scenario_with(change) -> Scenario:
-    """The default scenario with its parsed TOML edited by `change(raw)`."""
-    raw = copy.deepcopy(load_scenario().raw)
+def scenario_with(change, change_worlds=None) -> Scenario:
+    """The default scenario with its parsed TOML edited by `change(raw)`, and its scenario files
+    (scenarios/*.toml, by name) by `change_worlds(files)`."""
+    loaded = load_scenario()
+    raw, files = copy.deepcopy(loaded.raw), copy.deepcopy(loaded.scenario_files)
     change(raw)
-    return Scenario(raw, DEFAULT_SCENARIO)
+    if change_worlds:
+        change_worlds(files)
+    return Scenario(raw, DEFAULT_SCENARIO, files)
 
 
 def test_default_scenario_and_all_variants_load():
@@ -80,11 +84,13 @@ def test_a_new_good_site_and_occupation_need_no_code():
             "drought_sensitive": True,
         }
         raw["occupations"]["woodcutter"] = dict(raw["occupations"]["miner"], works_at="forest")
-        ashford = raw["world"]["towns"]["Ashford"]
-        ashford["sites"].append({"name": "Old Wood", "kind": "forest"})
+
+    def add_wood_to_ashford(worlds):
+        ashford = worlds["three_towns"]["world"]["towns"]["Ashford"]
+        ashford["sites"].append({"name": "Old Wood", "kind": "forest", "scale": 1.0})
         ashford["founding"]["woodcutter"] = 3
 
-    cfg = scenario_with(add_forestry).config()
+    cfg = scenario_with(add_forestry, add_wood_to_ashford).config()
     world = build_world(cfg, seed=1)
     for _ in range(20):
         engine.step(world)

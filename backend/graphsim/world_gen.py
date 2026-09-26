@@ -1,4 +1,4 @@
-"""Builds the starting world from a SimConfig and a seed (geography: scenario.toml [world])."""
+"""Builds the starting world from a SimConfig and a seed (the map: scenarios/<name>.toml)."""
 
 import random
 
@@ -22,13 +22,14 @@ def build_world(cfg: SimConfig, seed: int) -> World:
                 )
         for site_spec in spec.sites:
             kind = cfg.site_kinds[site_spec.kind]
+            capacity = kind.capacity * site_spec.scale  # a scale-2 site is two standard sites
             site = Site(
                 world.new_id("site"),
                 site_spec.name,
                 site_spec.kind,
-                stock=kind.capacity,
-                capacity=kind.capacity,
-                regen=kind.regen,
+                stock=capacity,
+                capacity=capacity,
+                regen=kind.regen * site_spec.scale,
             )
             world.add_site(site)
             world.add_edge(site.id, town.id, Layer.ACCESS, cost=cfg.world.site_access_cost)

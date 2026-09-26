@@ -1,0 +1,37 @@
+# Three Towns: the original world, written out town by town.
+# A farming town, a mixed town in the middle and a mining town, joined in a line by two roads.
+# Merchants in the middle town can reach both ends; everyone else trades at home.
+
+title = "Three Towns"
+description = "A farming town, a mixed town and a mining town joined in a line. The original world."
+
+# position: where the town sits on the map, 0..1 across and down (the viewer draws it there).
+# scale: a site's capacity and regen as a multiple of its kind's (1.0 = one standard site).
+
+[world.towns.Ashford]
+position = [0.15, 0.3]
+sites = [{ name = "North Farm", kind = "farm", scale = 1.0 }]
+founding = { farmer = 12, merchant = 1 }
+
+[world.towns.Millbrook]
+position = [0.5, 0.5]
+sites = [
+  { name = "South Farm", kind = "farm", scale = 1.0 },
+  { name = "Copper Mine", kind = "mine", scale = 1.0 },
+]
+founding = { farmer = 9, miner = 3, merchant = 2 }
+
+[world.towns.Stonehold]
+position = [0.85, 0.7]
+sites = [{ name = "Iron Mine", kind = "mine", scale = 1.0 }]
+founding = { miner = 5, merchant = 1 }
+
+[[world.roads]]
+from = "Ashford"
+to = "Millbrook"
+cost = 1.0
+
+[[world.roads]]
+from = "Millbrook"
+to = "Stonehold"
+cost = 1.0

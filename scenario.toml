@@ -1,10 +1,13 @@
 # =============================================================================================
-# graph-simulator scenario: every factor the simulation uses, in one file.
+# graph-simulator scenario: every factor the simulation uses. The world it runs in (towns,
+# sites, people, roads) is one of the files in scenarios/.
 #
 # How it is read (backend/graphsim/config.py):
 #   1. this file,
-#   2. then one [variants.<name>] table deep-merged on top (e.g. to switch a mechanism off),
-#   3. then any `--set section.key=value` overrides from the command line.
+#   2. then the chosen world from scenarios/ (its map, and any setting it changes),
+#   3. then one [variants.<name>] table deep-merged on top (e.g. to switch a mechanism off),
+#   4. then any `--set section.key=value` overrides from the command line
+#      (`--set generator.<param>=...` changes a generated world's parameters).
 # Every key below is required, and unknown keys are an error, so a typo can't silently
 # change an experiment. Units: goods in abstract "units", time in ticks, trust/strength 0..1.
 # =============================================================================================
@@ -12,6 +15,7 @@
 [run]
 seed = 1
 ticks = 2000
+scenario = "three_towns"      # the world used unless another is chosen (scenarios/<name>.toml)
 database = "runs/graphsim.db" # relative to this file
 
 
@@ -88,8 +92,9 @@ color = "#f5d76e"
 
 
 # =============================================================================================
-# WORLD: towns, their sites and founding population, and the roads between them.
-# Newcomers later fill whichever job a town is most short of, relative to `founding`.
+# WORLD: the towns, their sites and founding population, and the roads between them are
+# defined per scenario in scenarios/. Here: what every world shares.
+# Newcomers later fill whichever job a town is most short of, relative to its founding people.
 # =============================================================================================
 
 [world]
@@ -105,27 +110,12 @@ names = [
   "Tova", "Ulla", "Una", "Vale", "Vera", "Wren", "Yara", "Yves", "Zane", "Zora",
 ]
 
-[world.towns.Ashford]
-sites = [{ name = "North Farm", kind = "farm" }]
-founding = { farmer = 12, merchant = 1 }
-
-[world.towns.Millbrook]
-sites = [{ name = "South Farm", kind = "farm" }, { name = "Copper Mine", kind = "mine" }]
-founding = { farmer = 9, miner = 3, merchant = 2 }
-
-[world.towns.Stonehold]
-sites = [{ name = "Iron Mine", kind = "mine" }]
-founding = { miner = 5, merchant = 1 }
-
-[[world.roads]]
-from = "Ashford"
-to = "Millbrook"
-cost = 1.0
-
-[[world.roads]]
-from = "Millbrook"
-to = "Stonehold"
-cost = 1.0
+# What a generated world spreads over its towns (backend/graphsim/generators.py). Every
+# generated world gets the same people and the same total site capacity as three_towns, so
+# comparing worlds compares their shape, not their size.
+[layout]
+population = { farmer = 21, miner = 8, merchant = 4 }
+site_capacity = { farm = 2.0, mine = 2.0 }  # in standard sites (see site_kinds)
 
 
 # =============================================================================================
@@ -247,7 +237,7 @@ description = "No brokers at all. Note: this also shrinks the population by the 
 mechanisms = { brokering = false }
 
 [variants.no_merchants_equal_population]
-description = "No brokers, and each merchant's place goes to a farmer or miner, so the population stays the same."
+description = "No brokers, and each merchant's place goes to a farmer or miner, so the population stays the same (three_towns only: it names that map's towns)."
 mechanisms = { brokering = false }
 world = { towns = { Ashford = { founding = { farmer = 13 } }, Millbrook = { founding = { farmer = 10, miner = 4 } }, Stonehold = { founding = { miner = 6 } } } }
 
@@ -281,8 +271,9 @@ mechanisms = { partner_choice = "random_reachable" }
 
 
 # =============================================================================================
-# EXPERIMENTS: batches of runs. `seeds` is a range "a-b" or a list.
-# `sweep` generates one variant per value, e.g. sweep = { "trade.broker_commission" = [0.2, 0.8] }.
+# EXPERIMENTS: batches of runs: every scenario × variant × swept value × seed. `seeds` is a
+# range "a-b" or a list. `sweep` generates one variant per value, e.g.
+# sweep = { "trade.broker_commission" = [0.2, 0.8] } or { "generator.bridges" = [1, 2] }.
 # =============================================================================================
 
 [experiments.ablations]
@@ -290,6 +281,7 @@ description = "Which macro phenomena disappear when one mechanism is removed?"
 seeds = "1-100"
 ticks = 2000
 level = "summary"
+scenarios = ["three_towns"]
 variants = [
   "baseline", "no_gifting", "no_merchants", "no_merchants_equal_population", "no_introductions",
   "no_organizations", "no_droughts", "static_social", "random_partners",
@@ -301,6 +293,7 @@ description = "How broker power depends on the commission."
 seeds = "1-30"
 ticks = 2000
 level = "summary"
+scenarios = ["three_towns"]
 variants = ["baseline"]
 sweep = { "trade.broker_commission" = [0.1, 0.3, 0.5, 0.8] }
 
