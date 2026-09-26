@@ -10,8 +10,19 @@ export interface Figure {
 
 // Style properties that make a chart look the same outside the page's stylesheet.
 const INLINED_STYLES = [
-  "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray",
-  "opacity", "font-size", "font-family", "font-weight", "font-style", "text-anchor", "visibility",
+  "fill",
+  "fill-opacity",
+  "stroke",
+  "stroke-width",
+  "stroke-opacity",
+  "stroke-dasharray",
+  "opacity",
+  "font-size",
+  "font-family",
+  "font-weight",
+  "font-style",
+  "text-anchor",
+  "visibility",
 ];
 
 /** An on-page <svg> as a standalone SVG document, with its CSS styles written into it. */
@@ -51,9 +62,13 @@ export function composeFigure(
   const parts: string[] = [];
   for (const panel of panels) {
     if (panel.title) {
-      parts.push(`<text x="${x + 4}" y="${y + 14}" font-size="13" font-family="sans-serif" fill="${options.textColor}">${escapeXml(panel.title)}</text>`);
+      parts.push(
+        `<text x="${x + 4}" y="${y + 14}" font-size="13" font-family="sans-serif" fill="${options.textColor}">${escapeXml(panel.title)}</text>`,
+      );
     }
-    parts.push(`<svg x="${x}" y="${y + titleHeight}" width="${panel.width}" height="${panel.height}">${inner(panel.svg)}</svg>`);
+    parts.push(
+      `<svg x="${x}" y="${y + titleHeight}" width="${panel.width}" height="${panel.height}">${inner(panel.svg)}</svg>`,
+    );
     if (across) x += panel.width + gap;
     else y += panel.height + titleHeight + gap;
   }
@@ -86,16 +101,21 @@ export function runDescription(run: RunInfo | undefined): string {
     .join(", ");
   return (
     `run ${run.id} (world ${run.scenario}, seed ${run.seed}, variant ${run.variant}${overrides ? `, ${overrides}` : ""}, ` +
-    `${run.ticks} ticks, code ${run.code_version}, config ${run.config_hash})`
+    `${run.ticks} ticks, code ${run.code_version}, config ${run.config_hash}` +
+    (run.parent_run !== null
+      ? `; a branch of run ${run.parent_run} at tick ${run.branch_tick}: ${run.interventions
+          .filter((i) => i.tick === run.branch_tick)
+          .map((i) => JSON.stringify(i))
+          .join(" ")}`
+      : "") +
+    ")"
   );
 }
 
 /** "run834_three_towns_seed4_no_gifting_t250" */
 export function fileStem(run: RunInfo | undefined, ...parts: (string | number | undefined)[]): string {
   const base = run ? [`run${run.id}`, run.scenario, `seed${run.seed}`, run.variant] : [];
-  return [...base, ...parts.filter((p) => p !== undefined && p !== "")]
-    .join("_")
-    .replace(/[^A-Za-z0-9_.-]+/g, "-");
+  return [...base, ...parts.filter((p) => p !== undefined && p !== "")].join("_").replace(/[^A-Za-z0-9_.-]+/g, "-");
 }
 
 export function downloadSvg(figure: Figure, stem: string) {

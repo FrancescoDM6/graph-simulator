@@ -8,6 +8,8 @@ import type {
   OrgPage,
   ExperimentReport,
   RunInfo,
+  Intervention,
+  Lineage,
   Scenario,
   Series,
   WorldInfo,
@@ -54,6 +56,9 @@ export const api = {
     label: string;
   }) => post<RunInfo>("/runs", request),
   materialize: (id: number) => post<RunInfo>(`/runs/${id}/materialize`),
+  branch: (id: number, request: { tick: number; interventions: Intervention[]; label: string }) =>
+    post<RunInfo>(`/runs/${id}/branches`, request),
+  lineage: (id: number) => get<Lineage>(`/runs/${id}/lineage`),
   metrics: (id: number, names: string[]) =>
     get<{ names: string[]; series: Record<string, Series> }>(`/runs/${id}/metrics`, { names: names.join(",") }),
   snapshots: (id: number, first: number, count: number) =>

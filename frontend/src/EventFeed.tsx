@@ -10,6 +10,7 @@ const STRUCTURAL_KINDS = new Set([
   "community_formed", "community_split", "community_merged", "community_dissolved",
   "network_split", "network_merged", "inequality_rising", "new_top_broker",
   "drought_started", "drought_ended", "price_rose", "price_fell", "founded_org", "org_dissolved",
+  "intervention",
 ]);
 
 interface Props {

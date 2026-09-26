@@ -17,6 +17,8 @@ interface Props {
   onToggleLayer: (layer: Layer) => void;
   panelOpen: boolean;
   onTogglePanel: () => void;
+  branchTicks: number[]; // where this run's branches split off (drawn on the scrubber)
+  onIntervene: () => void;
 }
 
 /** Play/pause, stepping, a scrubber over the whole run (droughts marked on it), speed, layer
@@ -33,7 +35,12 @@ export function Playback(props: Props) {
         >
           {playing ? <PauseIcon /> : <PlayIcon />}
         </button>
-        <button className="ghost icon-button" onClick={() => props.onTick(tick - 1)} disabled={tick <= 0} title="previous tick">
+        <button
+          className="ghost icon-button"
+          onClick={() => props.onTick(tick - 1)}
+          disabled={tick <= 0}
+          title="previous tick"
+        >
           <StepBackIcon />
         </button>
         <button
@@ -52,13 +59,20 @@ export function Playback(props: Props) {
         max={Math.max(totalTicks, 1)}
         value={tick}
         aria-label="tick"
-        style={{ "--track": scrubberTrack(tick, lastTick, totalTicks, props.droughts) } as React.CSSProperties}
+        style={
+          {
+            "--track": scrubberTrack(tick, lastTick, totalTicks, props.droughts, props.branchTicks),
+          } as React.CSSProperties
+        }
         onChange={(e) => props.onTick(Math.min(lastTick, Number(e.target.value)))}
       />
       <span className="tick-readout" title={lastTick < totalTicks ? `computed up to tick ${lastTick}` : undefined}>
         <b>{tick}</b> / {totalTicks}
       </span>
       {drought && <span className="badge drought">DROUGHT</span>}
+      <button className="small" onClick={props.onIntervene} title="change the world at this tick, in a new branch">
+        Intervene
+      </button>
       <label className="speed" title="ticks per second">
         <input type="range" min={1} max={60} value={speed} onChange={(e) => props.onSpeed(Number(e.target.value))} />
         {speed}/s
@@ -90,19 +104,37 @@ export function Playback(props: Props) {
   );
 }
 
-/** The scrubber's track as stacked CSS gradients: droughts on top, then the part already played,
- * the part computed but not played, and the part not computed yet. */
-function scrubberTrack(tick: number, lastTick: number, totalTicks: number, droughts: [number, number][]): string {
+/** The scrubber's track as stacked CSS gradients: branch points and droughts on top, then the
+ * part already played, the part computed but not played, and the part not computed yet. */
+function scrubberTrack(
+  tick: number,
+  lastTick: number,
+  totalTicks: number,
+  droughts: [number, number][],
+  branchTicks: number[],
+): string {
   const at = (t: number) => `${((100 * t) / Math.max(1, totalTicks)).toFixed(2)}%`;
+  const width = Math.max(2, totalTicks / 400); // a branch mark, in ticks (visible at any length)
+  const branchStops = branchTicks.flatMap((t) => [
+    `transparent ${at(t)}`,
+    `#ffffff ${at(t)}`,
+    `#ffffff ${at(t + width)}`,
+    `transparent ${at(t + width)}`,
+  ]);
+  const branchLayer = branchStops.length
+    ? `linear-gradient(to right, transparent 0%, ${branchStops.join(", ")}), `
+    : "";
   const droughtStops = droughts.flatMap(([start, end]) => [
     `transparent ${at(start)}`,
     `rgba(232, 165, 75, 0.75) ${at(start)}`,
     `rgba(232, 165, 75, 0.75) ${at(end + 1)}`,
     `transparent ${at(end + 1)}`,
   ]);
-  const droughtLayer = droughtStops.length ? `linear-gradient(to right, transparent 0%, ${droughtStops.join(", ")}), ` : "";
+  const droughtLayer = droughtStops.length
+    ? `linear-gradient(to right, transparent 0%, ${droughtStops.join(", ")}), `
+    : "";
   const progress =
     `linear-gradient(to right, #6b7280 0%, #6b7280 ${at(tick)}, #2e343e ${at(tick)}, ` +
     `#2e343e ${at(lastTick)}, #171b21 ${at(lastTick)}, #171b21 100%)`;
-  return droughtLayer + progress;
+  return branchLayer + droughtLayer + progress;
 }

@@ -224,6 +224,9 @@ export function GraphView(props: Props) {
         case "founded_org":
           flash([a, b], "pulse-org");
           break;
+        case "intervention":
+          flash([...event.subjects], "pulse-intervention");
+          break;
         case "trusted":
           flash([edgeId(a, b, "social")], "pulse-trust-up");
           break;

@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
 import { BackIcon } from "./icons";
 
-export type SideTab = "inspect" | "events" | "communities";
+export type SideTab = "inspect" | "events" | "communities" | "branches";
 
 const TABS: [SideTab, string][] = [
   ["inspect", "Inspect"],
   ["events", "Events"],
   ["communities", "Communities"],
+  ["branches", "Branches"],
 ];
 
 interface Props {
@@ -40,7 +41,9 @@ export function SidePanel({ tab, onTab, content, page }: Props) {
         </div>
       )}
       {/* Events and communities manage their own scrolling (a fixed header over a list). */}
-      <div className={`side-body ${!page && tab !== "inspect" ? "fill" : ""}`}>{page ? page.content : content[tab]}</div>
+      <div className={`side-body ${!page && (tab === "events" || tab === "communities") ? "fill" : ""}`}>
+        {page ? page.content : content[tab]}
+      </div>
     </aside>
   );
 }

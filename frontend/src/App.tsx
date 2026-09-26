@@ -22,10 +22,20 @@ import { NewRunDialog, type NewRunRequest } from "./NewRunDialog";
 import { Playback } from "./Playback";
 import { RunBar, type Tab } from "./RunBar";
 import { Scenarios } from "./Scenarios";
+import { Branches } from "./Branches";
+import { Intervene } from "./Intervene";
 import { SidePanel, type SideTab } from "./SidePanel";
 import { FIGURE_BACKGROUND, FIGURE_TEXT } from "./theme";
 import { Timeline } from "./Timeline";
-import { LAYERS, type Layer, type RunInfo, type Scenario, type WorldInfo } from "./types";
+import {
+  type Intervention,
+  LAYERS,
+  type Layer,
+  type Lineage,
+  type RunInfo,
+  type Scenario,
+  type WorldInfo,
+} from "./types";
 
 const RUN_LIST_REFRESH_MS = 3000; // while any run is still computing
 const TOWN_COLORS = ["#e15759", "#4e79a7", "#59a14f", "#f28e2b", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7"];
@@ -42,6 +52,12 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [community, setCommunity] = useState<number | null>(null);
   const [whyEvent, setWhyEvent] = useState<number | null>(null);
+  // Intervening: the page is open, what is queued, and the run's family tree.
+  const [intervening, setIntervening] = useState(false);
+  const [queue, setQueue] = useState<Intervention[]>([]);
+  const [branching, setBranching] = useState(false);
+  const [branchError, setBranchError] = useState("");
+  const [lineage, setLineage] = useState<Lineage | null>(null);
   const [visibleLayers, setVisibleLayers] = useState<Set<Layer>>(new Set(LAYERS));
   const [newRunWorld, setNewRunWorld] = useState<string | null>(null); // the New run dialog, for this world
   const [worlds, setWorlds] = useState<WorldInfo[]>([]);
@@ -86,10 +102,7 @@ export function App() {
 
   // --- the runs being shown ---
 
-  const timelineMetrics = useMemo(
-    () => [...(scenario?.timeline.map((t) => t.metric) ?? []), "drought"],
-    [scenario],
-  );
+  const timelineMetrics = useMemo(() => [...(scenario?.timeline.map((t) => t.metric) ?? []), "drought"], [scenario]);
   const a = useRunData(runA, timelineMetrics);
   const b = useRunData(runB, timelineMetrics);
   const lastTick = a.run?.ticks_done ?? 0;
@@ -103,18 +116,35 @@ export function App() {
     () => Object.fromEntries(Object.entries(scenario?.occupations ?? {}).map(([name, o]) => [name, o.color])),
     [scenario],
   );
-  const townIds = snapshotA?.nodes.filter((n) => n.kind === "town").map((n) => n.id).join(",") ?? "";
+  const townIds =
+    snapshotA?.nodes
+      .filter((n) => n.kind === "town")
+      .map((n) => n.id)
+      .join(",") ?? "";
   const coloring = useMemo(
     () => ({
       mode: colorMode,
       occupationColors: colors,
-      townColors: Object.fromEntries(townIds.split(",").filter(Boolean).map((id, i) => [id, TOWN_COLORS[i % TOWN_COLORS.length]])),
+      townColors: Object.fromEntries(
+        townIds
+          .split(",")
+          .filter(Boolean)
+          .map((id, i) => [id, TOWN_COLORS[i % TOWN_COLORS.length]]),
+      ),
     }),
     [colorMode, colors, townIds],
   );
   const pulseKinds = [...pulseGroups].flatMap((g) => PULSE_KINDS[g]);
   const pulsesA = useTickEvents(runA, playback.tick, pulseKinds);
   const pulsesB = useTickEvents(runB, Math.min(playback.tick, lastTickB), pulseKinds);
+
+  // The run's family tree (for the Branches tab and the scrubber's branch marks).
+  const runsVersion = runs.map((r) => `${r.id}:${r.status}`).join(",");
+  useEffect(() => {
+    setLineage(null);
+    if (runA === null) return;
+    api.lineage(runA).then(setLineage, () => setLineage(null));
+  }, [runA, runsVersion]);
 
   // Names of every agent that ever lived in run A (for people who have since left).
   useEffect(() => {
@@ -151,6 +181,39 @@ export function App() {
     setGroup(next);
     setWhyEvent(null);
     if (next) setPanelOpen(true);
+  }
+
+  /** Pauses and opens the Intervene page for the tick at the cursor. */
+  function intervene() {
+    playback.setPlaying(false);
+    setIntervening(true);
+    setBranchError("");
+    setPanelOpen(true);
+  }
+
+  async function branchHere(label: string) {
+    if (runA === null) return;
+    setBranching(true);
+    setBranchError("");
+    try {
+      const branch = await api.branch(runA, { tick: branchTick(), interventions: queue, label });
+      await refreshRuns();
+      setRunB(branch.id); // the two histories side by side
+      setIntervening(false);
+      setQueue([]);
+      setSideTab("branches");
+      api.lineage(runA).then(setLineage);
+    } catch (e) {
+      setBranchError(String(e));
+    } finally {
+      setBranching(false);
+    }
+  }
+
+  /** The tick a branch made now starts at: the cursor, but never before the run's own start. */
+  function branchTick(): number {
+    const own = runs.find((r) => r.id === runA)?.branch_tick ?? 1;
+    return Math.max(1, own, playback.tick);
   }
 
   function why(eventId: number) {
@@ -193,7 +256,11 @@ export function App() {
       runDescription(runA),
       ...(runB ? [runDescription(runB)] : []),
     ].join("\n");
-    return composeFigure(panels, caption, { direction: "across", background: FIGURE_BACKGROUND, textColor: FIGURE_TEXT });
+    return composeFigure(panels, caption, {
+      direction: "across",
+      background: FIGURE_BACKGROUND,
+      textColor: FIGURE_TEXT,
+    });
   }
 
   async function startRun(request: NewRunRequest, compareWithCurrent: boolean) {
@@ -233,7 +300,26 @@ export function App() {
    * organization page (a trail can open on top of a page; "back" returns to it). */
   function sidePage() {
     if (runA === null) return null;
-    const tabName = { inspect: "Inspect", events: "Events", communities: "Communities" }[sideTab];
+    const tabName = { inspect: "Inspect", events: "Events", communities: "Communities", branches: "Branches" }[sideTab];
+    if (intervening && snapshotA && scenario) {
+      return {
+        content: (
+          <Intervene
+            tick={branchTick()}
+            snapshot={snapshotA}
+            scenario={scenario}
+            selectedId={selectedId}
+            queue={queue}
+            onQueue={setQueue}
+            onBranch={branchHere}
+            branching={branching}
+            error={branchError}
+          />
+        ),
+        backLabel: `Back to ${tabName}`,
+        onBack: () => setIntervening(false),
+      };
+    }
     if (whyEvent !== null) {
       return {
         content: <CausalTrail runId={runA} eventId={whyEvent} onJump={jump} />,
@@ -335,6 +421,8 @@ export function App() {
             onToggleLayer={toggleLayer}
             panelOpen={panelOpen}
             onTogglePanel={() => setPanelOpen(!panelOpen)}
+            branchTicks={lineage?.children.map((c) => c.branch_tick ?? 0) ?? []}
+            onIntervene={intervene}
           />
           <main className={`workspace ${panelOpen ? "" : "panel-closed"}`}>
             <div className={`graphs ${runB !== null ? "compare" : ""}`}>
@@ -440,6 +528,16 @@ export function App() {
                       onWhy={why}
                     />
                   ),
+                  branches: (
+                    <Branches
+                      lineage={lineage}
+                      onOpen={(id) => {
+                        selectRunA(id);
+                        setRunB(null);
+                      }}
+                      onCompare={(id) => setRunB(id === runA ? null : id)}
+                    />
+                  ),
                   communities: (
                     <Communities
                       runId={runA}
@@ -469,6 +567,7 @@ export function App() {
             lastTick={Math.max(lastTick, 1)}
             cursor={playback.tick}
             onPick={(tick) => jump(tick)}
+            marks={branchMarks(runInfoA, runB !== null ? runInfoB : undefined)}
             summary={<MetricsBar snapshot={snapshotA} onSelect={select} />}
             open={timelineOpen}
             onToggle={() => setTimelineOpen(!timelineOpen)}
@@ -493,4 +592,17 @@ export function App() {
       )}
     </div>
   );
+}
+
+/** Where a compared branch splits off from the run shown (or the run shown from its parent). */
+function branchMarks(a: RunInfo | undefined, b: RunInfo | undefined): { tick: number; label: string }[] {
+  for (const [child, parent] of [
+    [b, a],
+    [a, b],
+  ]) {
+    if (child && parent && child.parent_run === parent.id && child.branch_tick !== null) {
+      return [{ tick: child.branch_tick, label: `run #${child.id} branches off here` }];
+    }
+  }
+  return [];
 }

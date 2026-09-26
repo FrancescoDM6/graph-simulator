@@ -84,6 +84,22 @@ export interface RunInfo {
   ticks_done: number;
   code_version: string; // git commit the run was computed with
   config_hash: string; // identifies the exact settings
+  parent_run: number | null; // a branch: the run it branched from
+  branch_tick: number | null; // ... and the tick it starts at
+  interventions: Intervention[]; // every intervention in its history
+}
+
+/** A change made to a world at a tick (backend/graphsim/interventions.py), e.g.
+ * {tick: 1000, kind: "remove_agent", target: "top_broker"}. */
+export type Intervention = { tick?: number; kind: string } & Record<string, unknown>;
+
+/** A run's family: what it branched from, its siblings and its own branches. */
+export interface Lineage {
+  run: RunInfo & { final: Record<string, number> };
+  ancestors: (RunInfo & { final: Record<string, number> })[];
+  siblings: (RunInfo & { final: Record<string, number> })[];
+  children: (RunInfo & { final: Record<string, number> })[];
+  intervention_kinds: Record<string, string[]>; // kind -> its parameters
 }
 
 export type Series = [number, number][]; // [tick, value][]

@@ -254,6 +254,7 @@ export const stylesheet: cytoscape.StylesheetJson = [
   { selector: ".pulse-gift", style: { "underlay-color": "#6fcf8e", "underlay-opacity": 0.6, "underlay-padding": 12 } },
   { selector: ".pulse-starving", style: { "underlay-color": STARVING_COLOR, "underlay-opacity": 0.65, "underlay-padding": 12 } },
   { selector: ".pulse-population", style: { "underlay-color": "#ffffff", "underlay-opacity": 0.4, "underlay-padding": 12 } },
+  { selector: ".pulse-intervention", style: { "underlay-color": "#ffffff", "underlay-opacity": 0.7, "underlay-padding": 16 } },
   { selector: ".pulse-org", style: { "underlay-color": MEMBERSHIP_COLOR, "underlay-opacity": 0.6, "underlay-padding": 12 } },
   { selector: "edge.pulse-trust-up", style: { "line-color": "#6fcf8e", opacity: 1, width: 4 } },
   { selector: "edge.pulse-trust-down", style: { "line-color": STARVING_COLOR, opacity: 1, width: 4 } },
@@ -275,7 +276,7 @@ export const stylesheet: cytoscape.StylesheetJson = [
 
 // --- Event pulses ----------------------------------------------------------------------------
 
-export type PulseGroup = "trades" | "gifts" | "starving" | "population" | "organizations" | "trust";
+export type PulseGroup = "trades" | "gifts" | "starving" | "population" | "organizations" | "trust" | "interventions";
 export const PULSE_GROUPS: [PulseGroup, string][] = [
   ["trades", "trades"],
   ["gifts", "gifts"],
@@ -283,6 +284,7 @@ export const PULSE_GROUPS: [PulseGroup, string][] = [
   ["population", "arrivals & departures"],
   ["organizations", "organizations"],
   ["trust", "trust changes"],
+  ["interventions", "interventions"],
 ];
 
 // Which event kinds each pulse group shows.
@@ -293,6 +295,7 @@ export const PULSE_KINDS: Record<PulseGroup, string[]> = {
   population: ["arrived", "left"],
   organizations: ["joined_org", "left_org", "founded_org"],
   trust: ["trusted", "distrusted"],
+  interventions: ["intervention"],
 };
 
 /** The edge id serialize.py gives the edge between two nodes on a layer. */
