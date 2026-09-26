@@ -4,7 +4,8 @@ from graphsim.model import Agent, Layer, Site, World
 
 
 def update_season(world: World) -> None:
-    """A drought of `drought_length` ticks begins every `drought_every` ticks."""
+    """A drought of `drought_length` ticks begins every `drought_every` ticks, unless an
+    intervention brought one on or ended one early (interventions.py)."""
     seasons = world.cfg.seasons
     phase = world.tick % seasons.drought_every
     in_drought = (
@@ -12,10 +13,20 @@ def update_season(world: World) -> None:
         and world.tick >= seasons.drought_every
         and phase < seasons.drought_length
     )
+    forced = world.tick <= world.forced_drought_until
+    if forced:
+        in_drought = True
+    elif world.tick <= world.drought_suppressed_until:
+        in_drought = False
     if in_drought and not world.drought:
         world.drought = True
         event = world.log.add(
-            world.tick, "drought_started", (), "A drought began", cause="the dry season"
+            world.tick,
+            "drought_started",
+            (),
+            "A drought began",
+            cause="brought on by an intervention" if forced else "the dry season",
+            caused_by=(world.drought_intervention,) if forced else (),
         )
         world.drought_event = event.id
     elif not in_drought and world.drought:

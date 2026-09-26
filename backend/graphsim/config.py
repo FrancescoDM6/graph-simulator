@@ -451,6 +451,41 @@ class Scenario:
         return cfg
 
 
+def with_setting(cfg: SimConfig, dotted_key: str, value: Any) -> SimConfig:
+    """A copy of the settings with one value changed, e.g. ("trade.broker_commission", 0.8),
+    checked like the file is: the key must exist and the value must have the same type."""
+    parts = dotted_key.split(".")
+
+    def replaced(node: Any, i: int) -> Any:
+        part = parts[i]
+        if dataclasses.is_dataclass(node):
+            names = {_file_key(f.name): f.name for f in dataclasses.fields(node)}
+            if part not in names:
+                raise ScenarioError(f"setting {dotted_key!r}: {part!r} is not a key")
+            old = getattr(node, names[part])
+            new = replaced(old, i + 1) if i + 1 < len(parts) else _same_type(old, value)
+            return dataclasses.replace(node, **{names[part]: new})
+        if isinstance(node, dict) and part in node:
+            new = (
+                replaced(node[part], i + 1) if i + 1 < len(parts) else _same_type(node[part], value)
+            )
+            return {**node, part: new}
+        raise ScenarioError(f"setting {dotted_key!r}: {part!r} is not a key")
+
+    def _same_type(old: Any, new: Any) -> Any:
+        if isinstance(old, float) and isinstance(new, int) and not isinstance(new, bool):
+            return float(new)
+        if type(old) is not type(new):
+            raise ScenarioError(
+                f"setting {dotted_key!r}: expected {type(old).__name__}, got {new!r}"
+            )
+        return new
+
+    cfg = replaced(cfg, 0)
+    _check_references(cfg)
+    return cfg
+
+
 def load_scenario(path: Path | str = DEFAULT_SCENARIO) -> Scenario:
     path = Path(path)
     with path.open("rb") as f:

@@ -1,6 +1,6 @@
 """The tick loop. Read `step` top to bottom to see exactly what happens each tick."""
 
-from graphsim import metrics
+from graphsim import interventions, metrics
 from graphsim.events import Event
 from graphsim.model import World
 from graphsim.rules import groups, market, needs, production, relationships, trade
@@ -13,6 +13,9 @@ def step(world: World) -> list[Event]:
     world.interactions.clear()
     world.trust_changes.clear()
     world.flows.clear()
+
+    # 0. Interventions scheduled for this tick (none in an ordinary run)
+    interventions.apply_due(world)
 
     # 1. Consume: eat, starve, leave, arrive
     needs.consume(world)

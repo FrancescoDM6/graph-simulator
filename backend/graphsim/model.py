@@ -121,6 +121,8 @@ FLOW_CATEGORIES = (
     "levy_paid",
     "levy_received",
     "departure",  # holdings that leave the world with an agent
+    "intervention",  # given or taken by an intervention (interventions.py)
+    "subsidy",  # paid by a subsidy intervention
 )
 
 
@@ -161,6 +163,14 @@ class World:
     tick: int = 0
     drought: bool = False
     drought_event: int | None = None  # id of the current drought's "drought_started" event
+    # Interventions (interventions.py): what is scheduled, and what is still in effect.
+    schedule: list[dict] = field(default_factory=list)  # interventions still to come, by tick
+    subsidies: list[tuple[str, float, int, int]] = field(
+        default_factory=list
+    )  # (occupation, coin, until, event)
+    forced_drought_until: int = -1  # a drought brought on by an intervention lasts until here
+    drought_suppressed_until: int = -1  # ... or one ended by an intervention stays off until here
+    drought_intervention: int | None = None  # the intervention event behind the override
     prices: dict[str, float] = field(default_factory=dict)  # good -> current base price
     # good -> price at the last "price rose/fell" event, so only big moves get logged
     logged_prices: dict[str, float] = field(default_factory=dict)
