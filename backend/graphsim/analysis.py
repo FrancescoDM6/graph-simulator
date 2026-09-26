@@ -181,6 +181,8 @@ MEASURES: dict[str, Callable[[RunData], float]] = {
     "broker_share_ratio": broker_share_ratio,
     "broker_share": lambda run: _mean(later_half(run, "broker_share")),
     "mean_communities": lambda run: _mean(later_half(run, "communities")),
+    # Separate social groups (of at least min_component_size): 1 = one connected society.
+    "mean_components": lambda run: _mean(later_half(run, "social_components")),
     # 1 = communities just mirror the towns; lower = groups that cut across towns.
     "mean_town_alignment": lambda run: _mean(later_half(run, "community_town_alignment")),
     "community_median_lifespan": community_median_lifespan,

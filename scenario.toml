@@ -288,6 +288,27 @@ variants = [
 ]
 sweep = {}
 
+[experiments.topologies]
+description = "Which phenomena depend on the shape of the world? Six worlds with the same people and resources (merchant_economy: twice the merchants)."
+seeds = "1-50"
+ticks = 2000
+level = "summary"
+scenarios = [
+  "three_towns", "hub_and_spokes", "two_regions", "isolated_villages", "resource_imbalance",
+  "merchant_economy",
+]
+variants = ["baseline"]
+sweep = {}
+
+[experiments.bridges]
+description = "When do two regions split apart, and do brokers gather on the bridges?"
+seeds = "1-30"
+ticks = 2000
+level = "summary"
+scenarios = ["two_regions"]
+variants = ["baseline"]
+sweep = { "generator.bridges" = [1, 2, 3, 4] }
+
 [experiments.commission_sweep]
 description = "How broker power depends on the commission."
 seeds = "1-30"
