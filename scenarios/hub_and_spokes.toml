@@ -1,0 +1,10 @@
+# Hub and Spokes: a central market town with every merchant, and outlying towns holding the
+# farms and mines. Spokes have no road to each other, so everything between them goes through
+# the hub. Same people and site capacity as every generated world ([layout] in scenario.toml).
+
+title = "Hub and Spokes"
+description = "A central market town joined to outlying farming and mining towns; no road between spokes."
+
+[generator]
+name = "hub_and_spokes"
+spokes = 4

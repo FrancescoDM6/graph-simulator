@@ -1,0 +1,34 @@
+# Merchant Economy: the Three Towns map with twice the merchants (8 instead of 4) and four
+# fewer farmers, so the population stays 33. The one thing that differs from three_towns is
+# how many intermediaries there are.
+
+title = "Merchant Economy"
+description = "The Three Towns map with twice as many merchants (and fewer farmers, same population)."
+
+[world.towns.Ashford]
+position = [0.15, 0.3]
+sites = [{ name = "North Farm", kind = "farm", scale = 1.0 }]
+founding = { farmer = 10, merchant = 2 }
+
+[world.towns.Millbrook]
+position = [0.5, 0.5]
+sites = [
+  { name = "South Farm", kind = "farm", scale = 1.0 },
+  { name = "Copper Mine", kind = "mine", scale = 1.0 },
+]
+founding = { farmer = 7, miner = 3, merchant = 4 }
+
+[world.towns.Stonehold]
+position = [0.85, 0.7]
+sites = [{ name = "Iron Mine", kind = "mine", scale = 1.0 }]
+founding = { miner = 5, merchant = 2 }
+
+[[world.roads]]
+from = "Ashford"
+to = "Millbrook"
+cost = 1.0
+
+[[world.roads]]
+from = "Millbrook"
+to = "Stonehold"
+cost = 1.0

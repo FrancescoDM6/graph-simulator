@@ -1,0 +1,12 @@
+# Two Regions: two clusters of towns, tightly connected inside, joined by a few bridge roads.
+# Each region has its own farms and mines. Sweep `bridges` to ask when the regions split apart:
+#   --set generator.bridges=3,  or  sweep = { "generator.bridges" = [1, 2, 3, 4] }
+
+title = "Two Regions"
+description = "Two tightly knit regions, each with farms and mines, joined by a few bridge roads."
+
+[generator]
+name = "two_regions"
+towns_per_region = 2
+bridges = 1
+resources = "balanced"

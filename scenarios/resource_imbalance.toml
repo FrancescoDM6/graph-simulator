@@ -1,0 +1,12 @@
+# Resource Imbalance: the Two Regions map, but the West holds every farm and the East every
+# mine. Each region depends on the other for something it needs (food, or the ore farmers use
+# as tools), and only the bridge carries it.
+
+title = "Resource Imbalance"
+description = "Two regions joined by one bridge; the West has all the farms, the East all the mines."
+
+[generator]
+name = "two_regions"
+towns_per_region = 2
+bridges = 1
+resources = "split"

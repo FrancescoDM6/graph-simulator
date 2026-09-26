@@ -1,0 +1,11 @@
+# Isolated Villages: many small villages, each beside one small farm or mine, joined only to
+# their neighbours in a long line. Goods travel village to village through merchants, one hop
+# at a time. The total site capacity is the same as every other world, just split thinly.
+
+title = "Isolated Villages"
+description = "Eight small villages in a long line, each with one small farm or mine; only neighbours are joined."
+
+[generator]
+name = "villages"
+villages = 8
+links = "chain"
