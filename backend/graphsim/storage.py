@@ -229,6 +229,18 @@ def assign_experiment_run(
         )
 
 
+def forget_old_labels(conn: sqlite3.Connection, experiment: str, labels: list[str]) -> None:
+    """Drops the experiment's assignments under labels it no longer has (after its variants or
+    sweep changed in scenario.toml), so reports show only what the experiment is now. The runs
+    themselves stay stored."""
+    placeholders = ", ".join("?" for _ in labels)
+    with conn:
+        conn.execute(
+            f"delete from experiment_runs where experiment = ? and label not in ({placeholders})",
+            (experiment, *labels),
+        )
+
+
 def set_status(conn: sqlite3.Connection, run_id: int, status: str) -> None:
     with conn:
         conn.execute("update runs set status = ? where id = ?", (status, run_id))

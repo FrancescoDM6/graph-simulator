@@ -68,6 +68,7 @@ def run_experiment(
     ticks = ticks or experiment.ticks
     conn = storage.connect(scenario.database)
     jobs = plan(scenario, name, seeds)
+    storage.forget_old_labels(conn, name, sorted({job.label for job in jobs}))
 
     pending: list[tuple[Job, int]] = []
     for job in jobs:

@@ -5,9 +5,10 @@ trade, membership and access are edge layers. There is no map, grid or hidden st
 node and edge attributes listed here.
 
 **Every factor lives in [`scenario.toml`](../scenario.toml)**: the goods, sites and occupations
-of the economy, the towns and roads, every parameter, mechanism switches, variants, experiments,
-phenomenon thresholds, recording levels and the viewer's timeline. Names in `code` below are keys
-in that file.
+of the economy, every parameter, mechanism switches, variants, experiments, phenomenon
+thresholds, recording levels and the viewer's timeline. **The world it runs in** (towns, their
+sites and founding people, roads) is one of the files in [`scenarios/`](../scenarios). Names in
+`code` below are keys in those files.
 
 ## The economy (data-driven)
 
@@ -23,15 +24,49 @@ in that file.
   - they can `reach` their home town, or also its neighbours;
   - they may be `brokers`.
 
-The default scenario:
+The default economy:
 - farmers grow food and use ore as tools;
 - miners dig ore;
-- merchants broker deals between towns;
-- three towns lie in a line, Ashford – Millbrook – Stonehold. Ashford has no mine and
-  Stonehold has no farm.
+- merchants broker deals between towns.
 
 A new good, site kind or occupation needs no code, only entries in the file (tested in
 `test_config.py`).
+
+## Worlds (`scenarios/`)
+
+Each file in `scenarios/` is a world: a `title`, a `description`, and either a written-out map
+(`[world.towns.*]` with a `position`, `sites` and `founding` people, plus `[[world.roads]]`) or a
+`[generator]` with a few parameters that writes the map (`backend/graphsim/generators.py`). A
+world file may also change any other setting, the way a variant does. `[run] scenario` names the
+default world.
+
+- **Sites** have a `scale`: their capacity and regrowth as a multiple of their kind's. It lets a
+  map split a farm's worth of land over several villages.
+- **Towns** have a `position` on the map (0..1). The viewer draws the map from it and starts the
+  graph in that shape.
+- **Reach is one road hop.** Producers trade in their home town; merchants reach home and the
+  towns one road away, and broker between them (`rules/trade.py`). Road `cost` is stored but no
+  rule reads it.
+- **Generated worlds are deterministic.** A map depends only on its parameters, never on the
+  run's seed, so different seeds vary what the agents do, not where they live.
+- **Every generated world has the same totals** (`[layout]`): the same 33 people by occupation
+  (21 farmers, 8 miners, 4 merchants) and the same capacity of each site kind (2 standard
+  farms, 2 standard mines). Worlds differ in shape, not size. `python -m graphsim.scenarios`
+  prints every world's totals and road-map shape, so any other difference is visible.
+
+| World | Map | Merchants live |
+|---|---|---|
+| `three_towns` (default) | Three towns in a line: a farming town, a mixed town, a mining town. | 1 / 2 / 1 |
+| `hub_and_spokes` | A central market town joined to 4 spokes (2 farming, 2 mining); no road between spokes. | all in the hub |
+| `two_regions` | Two regions of 2 towns, fully connected inside, joined by `bridges` roads; each region has a farm and a mine. | at the bridge ends, or in every town (`merchants`) |
+| `isolated_villages` | 8 villages in a chain, each beside one half-size farm or mine. | every other village |
+| `resource_imbalance` | `two_regions` with all the farms in the West and all the mines in the East. | at the bridge ends |
+| `merchant_economy` | `three_towns` with 8 merchants and 17 farmers (same 33 people). | 2 / 4 / 2 |
+
+Experiments cross worlds with variants (`scenarios = [...]`), and sweeps can set generator
+parameters (`"generator.bridges" = [1, 2, 3, 4]`). A world is its scenario plus its generator
+parameters, and **runs are only paired by seed within one world**: the same seed on a different
+map is a different world, so worlds are compared by their distributions.
 
 ## Edge layers
 
@@ -231,3 +266,62 @@ Other results:
 > Droughts start on multiples of 200, so the 5-tick samples always caught each drought's first
 > tick, before hunger had built up. One verdict changed: solidarity without merchants went from
 > 0/100 to 83/100, because its median (3.2×) is right at the threshold of 3.
+
+## What the scenario study found
+
+`python -m graphsim.experiment topologies`: 6 worlds × seeds 1–50 × 2000 ticks (300 runs).
+`python -m graphsim.experiment bridges`: `two_regions` with 1–4 bridges × both merchant placements
+× seeds 1–30 (240 jobs; 150 distinct runs, because with two towns per region, 2+ bridges touch
+every town, so both placements give the same map). Worlds are compared by their distributions:
+medians below, with the interquartile range in brackets. Every generated world has the same
+people and site capacity; `merchant_economy` has 8 merchants instead of 4.
+
+| World | Brokers' share of trade paths | Final Gini | Social groups | Drought starvation ratio | Community lifespan (ticks) |
+|---|---|---|---|---|---|
+| hub_and_spokes | **0.84** [0.82, 0.87] | **0.79** [0.73, 0.82] | 1.44 | 6.2 [5.9, 6.8] | **120** [86, 160] |
+| two_regions | 0.80 [0.73, 0.86] | 0.75 [0.70, 0.82] | 1.51 | 5.5 [5.2, 6.1] | 81 [64, 95] |
+| resource_imbalance | 0.74 [0.58, 0.86] | 0.65 [0.58, 0.74] | 1.20 | 5.1 [4.5, 5.8] | 69 [51, 90] |
+| three_towns | 0.57 [0.46, 0.71] | 0.61 [0.58, 0.64] | 1.28 | 5.8 [5.6, 6.4] | 75 [49, 117] |
+| isolated_villages | 0.55 [0.44, 0.66] | 0.65 [0.56, 0.73] | 1.12 | 6.1 [5.5, 7.0] | **21** [14, 38] |
+| merchant_economy | **0.46** [0.33, 0.60] | **0.54** [0.46, 0.57] | 1.22 | **4.6** [4.4, 4.9] | 46 [25, 82] |
+
+**Every phenomenon appears in every world** (each in at least 74% of seeds, most in 100%). The
+shape of the world changes how strong they are, not whether they happen.
+
+1. **Does brokerage depend on topology? Yes, strongly.** Where every route between producers runs
+   through a few merchants (all merchants in the hub; merchants at the one bridge), brokers hold
+   80–84% of trade paths, against 55–57% in the line of three towns or the village chain. The
+   interquartile ranges don't overlap. With twice the merchants (`merchant_economy`), brokers as
+   a group hold *less* (46%): they compete. (Its `brokerage` phenomenon drops to 74% of seeds,
+   partly by construction, since the measure divides by the brokers' share of the population.)
+2. **Does inequality appear everywhere? Yes (Gini ≥ 0.4 in 84–100% of seeds).** It is highest
+   where brokerage is concentrated (hub 0.79, two regions 0.75) and lowest with more, competing
+   merchants (0.54). Inequality follows brokerage.
+3. **Which networks survive drought?** None escapes the drought shock (100% of seeds in every
+   world). It is mildest with more merchants (4.6×) and worst in the hub and the village chain
+   (6.1–6.2×). The lowest population reached differs little (67–70% of the founding people).
+   In `two_regions`, merchants spread over every town instead of the bridge towns cut the shock
+   from 5.5× to 3.7× (bridges: 1).
+4. **When does fragmentation occur?** Not where expected. More bridges between two regions do
+   **not** knit the social graph together: with merchants in every town, separate social groups
+   go from 1.6 (1 bridge) to 1.9–2.0 (3–4 bridges), and communities come to mirror towns more
+   (town alignment 0.89 → 0.95). The village chain, the most spread-out map, is the *least*
+   fragmented socially (1.1 groups): merchants in every other village link neighbours through
+   trade friendships. What more bridges do reduce is inequality (Gini 0.78 → 0.53 from 1 to 4
+   bridges). The bridge sweep's brokerage is bimodal once merchants sit in every town: in some
+   seeds brokers end up with almost no trade paths (p5 of the brokerage ratio is 0).
+5. **Which structures encourage strong communities?** Measured by how long communities last, the
+   hub (median 120 ticks), and two regions (81). Communities in the village chain are short-lived
+   (21 ticks, half of them flicker), partly because villages of 3–6 people are at or below the
+   minimum community size (4), so detected groups must span villages and keep re-forming.
+
+Other results:
+
+- **Resources split between regions change little.** `resource_imbalance` against
+  `two_regions` (same roads, same merchants): slightly less brokerage and inequality, a slightly
+  milder drought, all within each other's interquartile ranges.
+- **Gifting in the village chain is constant, not a drought response.** It has the most gifts
+  (1,062 per 1,000 ticks) but the smallest surge in droughts (9.9×, against 17–19× elsewhere).
+- **Caveat: where merchants live is a modelling choice.** It moved the results as much as the
+  roads did (bridges: 1, brokers' share 0.81 at the bridge towns against 0.55 in every town).
+  `generators.place_merchants_two_regions` is where to try other rules.

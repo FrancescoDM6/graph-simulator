@@ -166,3 +166,10 @@ def test_generator_parameters_can_be_swept(scenario):
     assert one["config_hash"] != three["config_hash"]  # different maps
     # ... so they are different worlds, and never paired with each other.
     assert report.build(conn, scenario, "bridges")["paired"] == []
+
+    # After the sweep changes, the report shows only the labels the experiment now has.
+    scenario.experiments["bridges"] = type(scenario.experiments["bridges"])(
+        **{**scenario.experiments["bridges"].__dict__, "sweep": {"generator.bridges": [3]}}
+    )
+    experiment.run_experiment(scenario, "bridges", workers=1)
+    assert report.build(conn, scenario, "bridges")["labels"] == ["baseline[generator.bridges=3]"]
